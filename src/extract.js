@@ -1,0 +1,236 @@
+'use strict';
+const fs = require('fs');
+const path = require('path');
+
+const MD_PATH = path.join(__dirname, '..', 'options-history-since-feb.md');
+const OUT_PATH = path.join(__dirname, '..', 'portfolio_data.json');
+
+// Parse premium strings: "$840", "-$889", "$1,768", "—", ""
+function parsePremium(str) {
+  if (!str || /^[—–-]*$/.test(str.trim())) return 0;
+  const cleaned = str.replace(/,/g, '').replace(/[^0-9.-]/g, '');
+  const val = Number(cleaned);
+  return Number.isFinite(val) ? val : 0;
+}
+
+// Normalize week label: "2/13 " -> "2/13", "3/6 " -> "3/6"
+function normalizeWeek(raw) {
+  return raw.trim();
+}
+
+function extractFromMarkdown(mdPath, outPath) {
+  if (!fs.existsSync(mdPath)) {
+    throw new Error(`Cannot find data source: ${mdPath}`);
+  }
+
+  const content = fs.readFileSync(mdPath, 'utf8');
+  const lines = content.split('\n');
+
+  const data = {
+    updatedAt: new Date().toISOString().slice(0, 10),
+    cash: 0,
+    weeklyData: [],
+    openPositions: [],
+    idlePositions: [],
+    closedTrades: [],
+  };
+
+  // Summary table parsed from the header for cross-validation
+  const summaryByWeek = {};
+
+  // State machine
+  const STATE = {
+    TOP: 'TOP',
+    SUMMARY_TABLE: 'SUMMARY_TABLE',
+    HISTORY_WEEK: 'HISTORY_WEEK',
+    OPEN_POSITIONS: 'OPEN_POSITIONS',
+    OPEN_CC: 'OPEN_CC',
+    OPEN_CSP: 'OPEN_CSP',
+    IDLE: 'IDLE',
+  };
+  let state = STATE.TOP;
+  let currentWeek = null; // e.g. "2/13"
+
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i];
+    const line = raw.trim();
+
+    // Skip separator rows
+    if (/^\|[-:| ]+\|$/.test(line)) continue;
+
+    // Detect summary table (top-level overview)
+    if (line.match(/^###.*总览/) || line.match(/^###.*Overview/i)) {
+      state = STATE.SUMMARY_TABLE;
+      continue;
+    }
+
+    // Detect weekly history section heading: #### 2/13 到期周
+    const weekMatch = line.match(/^####\s+(.+?)到期周/);
+    if (weekMatch) {
+      state = STATE.HISTORY_WEEK;
+      currentWeek = normalizeWeek(weekMatch[1]);
+      continue;
+    }
+
+    // Detect open positions section: ### 📝 在途持仓 / ### Open
+    if (line.match(/^###\s+.*在途/) || line.match(/^###\s+.*Open/i)) {
+      state = STATE.OPEN_POSITIONS;
+      continue;
+    }
+
+    // Detect idle stock section: ### 📦 持仓股票 / ### Idle / ### Holdings
+    if (line.match(/^###\s+.*持仓股票/) || line.match(/^###\s+.*Idle/i) || line.match(/^###\s+.*Holdings/i)) {
+      state = STATE.IDLE;
+      continue;
+    }
+
+    // Detect open sub-type: #### CC / #### CSP
+    if (state === STATE.OPEN_POSITIONS || state === STATE.OPEN_CC || state === STATE.OPEN_CSP) {
+      const openTypeMatch = line.match(/^####\s+(CC|CSP)\s*$/i);
+      if (openTypeMatch) {
+        state = openTypeMatch[1].toUpperCase() === 'CC' ? STATE.OPEN_CC : STATE.OPEN_CSP;
+        continue;
+      }
+    }
+
+    // Any higher-level heading resets state
+    if (/^#{1,3}\s/.test(line) && !line.match(/^####/)) {
+      // Only reset if not already handled above
+      if (state !== STATE.SUMMARY_TABLE && state !== STATE.OPEN_POSITIONS) {
+        state = STATE.TOP;
+        currentWeek = null;
+      }
+      continue;
+    }
+
+    // Parse table rows
+    if (!line.startsWith('|')) continue;
+    const parts = line.split('|').map(s => s.trim()).filter(Boolean);
+    if (parts.length === 0) continue;
+    // Skip header rows
+    if (parts[0] === '标的' || parts[0] === '到期周' || parts[0].startsWith('Ticker') || parts[0].startsWith('总计') || parts[0].startsWith('2月')) continue;
+
+    if (state === STATE.SUMMARY_TABLE && parts.length >= 2) {
+      // | 到期周 | 已实现权利金 | 备注 |
+      // Normalize: "2/13 周" → "2/13"
+      const weekLabel = parts[0].trim().replace(/\s*周$/, '');
+      const premiumStr = parts[1].replace(/\*\*/g, '').replace(/,/g, '').trim();
+      const val = Number(premiumStr.replace(/[^0-9.-]/g, ''));
+      if (Number.isFinite(val) && val > 0 && weekLabel.includes('/')) {
+        summaryByWeek[weekLabel] = val;
+      }
+      continue;
+    }
+
+    if (state === STATE.HISTORY_WEEK && currentWeek && parts.length >= 4) {
+      // | 标的 | 类型 | Strike | 权利金 | 结果 |
+      const ticker = parts[0];
+      const type = parts[1].toUpperCase();
+      const strike = Number(parts[2].replace(/[^0-9.]/g, ''));
+      const premium = parsePremium(parts[3]);
+      const result = parts[4] || '';
+
+      if (ticker && (type === 'CC' || type === 'CSP')) {
+        data.closedTrades.push({
+          ticker,
+          type,
+          strike,
+          premium,
+          expiryWeek: currentWeek,
+          assigned: /assign|接货/i.test(result),
+          result: result.replace(/\*\*/g, '').trim(),
+        });
+      }
+      continue;
+    }
+
+    if ((state === STATE.OPEN_CC || state === STATE.OPEN_CSP) && parts.length >= 4) {
+      // | 标的 | Strike | 到期日 | 权利金 |
+      const ticker = parts[0];
+      const strike = Number(parts[1].replace(/[^0-9.]/g, ''));
+      const expiry = parts[2].trim();
+      const premium = parsePremium(parts[3]);
+      const type = state === STATE.OPEN_CC ? 'CC' : 'CSP';
+
+      if (ticker) {
+        data.openPositions.push({ ticker, type, strike, expiry, premium, contracts: 1 });
+      }
+      continue;
+    }
+
+    if (state === STATE.IDLE && parts.length >= 3) {
+      // | 标的 | 股数 | 成本 | 可卖CC | 备注 |
+      const ticker = parts[0];
+      const shares = Number(parts[1].replace(/[^0-9]/g, ''));
+      const costBasis = Number(parts[2].replace(/[^0-9.]/g, ''));
+      const canSellCC = parts[3] ? !/[×✗xX否no]/i.test(parts[3]) : true;
+      const note = parts[4] || '';
+
+      if (ticker && Number.isFinite(shares)) {
+        data.idlePositions.push({ ticker, shares, costBasis, canSellCC, note });
+      }
+      continue;
+    }
+  }
+
+  // Aggregate weeklyData from closedTrades
+  const weekMap = {};
+  for (const t of data.closedTrades) {
+    const w = t.expiryWeek;
+    if (!weekMap[w]) weekMap[w] = { week: w, label: `${w} 到期周`, realized: 0, trades: 0 };
+    weekMap[w].realized += t.premium;
+    weekMap[w].trades += 1;
+  }
+
+  // Sort chronologically: treat "M/D" as sortable
+  data.weeklyData = Object.values(weekMap).sort((a, b) => {
+    const toNum = (w) => {
+      const [m, d] = w.week.split('/').map(Number);
+      return m * 100 + d;
+    };
+    return toNum(a) - toNum(b);
+  });
+
+  // Cross-validate against summary table
+  const warnings = [];
+  for (const [weekLabel, summaryVal] of Object.entries(summaryByWeek)) {
+    const extracted = weekMap[weekLabel];
+    if (!extracted) {
+      warnings.push(`Summary table mentions "${weekLabel}" but no trades found for this week`);
+      continue;
+    }
+    const diff = Math.abs(extracted.realized - summaryVal);
+    if (diff > 5) {
+      warnings.push(`Week "${weekLabel}": summary says $${summaryVal}, extracted $${extracted.realized} (diff $${diff})`);
+    }
+  }
+
+  if (warnings.length) {
+    console.warn('\n⚠️  Cross-validation warnings:');
+    for (const w of warnings) console.warn(`   - ${w}`);
+    console.warn('');
+  }
+
+  fs.writeFileSync(outPath, JSON.stringify(data, null, 2));
+
+  const totalRealized = data.weeklyData.reduce((s, w) => s + w.realized, 0);
+  console.log(`✅ Extracted to ${path.basename(outPath)}`);
+  console.log(`   ${data.closedTrades.length} closed trades across ${data.weeklyData.length} weeks`);
+  console.log(`   ${data.openPositions.length} open positions`);
+  console.log(`   ${data.idlePositions.length} idle stock positions`);
+  console.log(`   Total realized: $${totalRealized}`);
+
+  return data;
+}
+
+// Standalone execution
+if (require.main === module) {
+  try {
+    extractFromMarkdown(MD_PATH, OUT_PATH);
+  } catch (err) {
+    console.error('❌', err.message);
+    process.exit(1);
+  }
+}
+
+module.exports = { extractFromMarkdown, parsePremium };

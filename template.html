@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Theta Gang Dashboard</title>
+    <link rel="icon" type="image/svg+xml" href="icon.svg">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0a0e14; color: #c9d1d9; padding: 20px; line-height: 1.5; }
+        .container { max-width: 820px; margin: 0 auto; }
+        h1 { font-size: 26px; margin-bottom: 24px; background: linear-gradient(135deg, #58a6ff, #bc8cff); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+
+        /* Lock screen */
+        #lock { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 60vh; gap: 12px; }
+        #lock h1 { -webkit-text-fill-color: transparent; }
+        #lock input { background: #12171f; border: 2px solid #1e2733; border-radius: 8px; color: #c9d1d9; font-size: 18px; padding: 12px 20px; width: 220px; text-align: center; outline: none; transition: border-color 0.2s; }
+        #lock input:focus { border-color: #58a6ff; }
+        #lock button { background: #58a6ff; color: white; border: none; padding: 12px 28px; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 600; transition: opacity 0.2s; }
+        #lock button:hover { opacity: 0.85; }
+        #lock .error { color: #f85149; font-size: 13px; height: 18px; }
+
+        /* Dashboard */
+        #dashboard { display: none; animation: fadeIn 0.4s; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+        .updated-at { font-size: 11px; color: #6e7681; text-align: right; margin-bottom: 8px; }
+
+        /* Stats grid */
+        .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 28px; }
+        .stat-card { background: #12171f; border: 1px solid #1e2733; border-radius: 12px; padding: 16px; }
+        .stat-card .label { color: #6e7681; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+        .stat-card .value { font-size: 22px; font-weight: 700; }
+        .stat-card .sub { font-size: 12px; color: #6e7681; margin-top: 4px; }
+        .green { color: #3fb950; }
+        .blue { color: #58a6ff; }
+        .cyan { color: #39d2c0; }
+        .purple { color: #bc8cff; }
+        .yellow { color: #d29922; }
+
+        /* Section */
+        .section { margin-bottom: 28px; }
+        .section h2 { font-size: 12px; color: #6e7681; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid #1e2733; }
+
+        /* Position cards */
+        .pos-card { background: #12171f; border: 1px solid #1e2733; border-left: 4px solid #444; border-radius: 0 8px 8px 0; padding: 14px 16px; margin-bottom: 10px; }
+        .pos-card.CC { border-left-color: #39d2c0; }
+        .pos-card.CSP { border-left-color: #bc8cff; }
+        .pos-header { display: flex; justify-content: space-between; align-items: center; }
+        .pos-ticker { font-size: 15px; font-weight: 700; }
+        .pos-badge { font-size: 10px; padding: 2px 7px; border-radius: 99px; font-weight: 700; margin-left: 6px; }
+        .pos-badge.CC { background: rgba(57,210,192,0.15); color: #39d2c0; }
+        .pos-badge.CSP { background: rgba(188,140,255,0.15); color: #bc8cff; }
+        .pos-premium { font-size: 15px; font-weight: 700; color: #3fb950; }
+        .pos-meta { display: flex; gap: 16px; font-size: 12px; color: #6e7681; margin-top: 6px; }
+        .dte-hot { color: #f85149; }
+        .dte-warm { color: #d29922; }
+        .empty-note { color: #6e7681; font-size: 13px; font-style: italic; }
+
+        /* Idle positions table */
+        .idle-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        .idle-table th { text-align: left; color: #6e7681; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; padding: 6px 12px; border-bottom: 1px solid #1e2733; }
+        .idle-table td { padding: 9px 12px; border-bottom: 1px solid #12171f; }
+        .idle-table tr:hover td { background: #12171f; }
+        .idle-table .ticker-cell { font-weight: 700; color: #c9d1d9; }
+        .cc-yes { color: #3fb950; font-size: 12px; }
+        .cc-no { color: #6e7681; font-size: 12px; }
+
+        /* Chart */
+        .chart-wrap { background: #12171f; border: 1px solid #1e2733; border-radius: 12px; padding: 20px; }
+
+        /* Trade history */
+        .week-group { margin-bottom: 10px; }
+        .week-header { display: flex; justify-content: space-between; align-items: center; padding: 11px 16px; background: #12171f; border: 1px solid #1e2733; border-radius: 8px; cursor: pointer; transition: background 0.15s; user-select: none; }
+        .week-header:hover { background: #161b22; }
+        .week-left { display: flex; align-items: center; gap: 10px; }
+        .week-arrow { font-size: 11px; color: #6e7681; transition: transform 0.2s; }
+        .week-arrow.open { transform: rotate(90deg); }
+        .week-title { font-size: 14px; font-weight: 700; color: #58a6ff; }
+        .week-count { font-size: 11px; color: #6e7681; }
+        .week-total { font-size: 15px; font-weight: 700; color: #3fb950; }
+        .week-total.negative { color: #f85149; }
+        .week-trades { display: none; padding: 6px 0 4px 0; }
+        .week-trades.open { display: block; }
+        .trade-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 16px; font-size: 13px; border-radius: 6px; }
+        .trade-row:hover { background: #12171f; }
+        .trade-left { display: flex; flex-direction: column; gap: 2px; }
+        .trade-ticker { font-weight: 700; }
+        .trade-detail { font-size: 11px; color: #6e7681; }
+        .trade-premium { font-weight: 700; }
+        .trade-assigned { font-size: 10px; background: rgba(217,130,43,0.15); color: #d29922; padding: 1px 5px; border-radius: 4px; margin-left: 6px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Lock screen -->
+        <div id="lock">
+            <h1>Theta Gang</h1>
+            <input type="password" id="pwd" placeholder="密码" autocomplete="current-password">
+            <button onclick="unlock()">解锁</button>
+            <div class="error" id="err"></div>
+        </div>
+
+        <!-- Dashboard -->
+        <div id="dashboard">
+            <div class="updated-at" id="updated-at"></div>
+            <h1>Theta Gang 战况</h1>
+
+            <!-- Stats -->
+            <div class="stats" id="stats"></div>
+
+            <!-- Open Positions -->
+            <div class="section">
+                <h2>在途持仓</h2>
+                <div id="open-positions"></div>
+            </div>
+
+            <!-- Idle Stock Holdings -->
+            <div class="section" id="idle-section">
+                <h2>持仓股票</h2>
+                <div id="idle-positions"></div>
+            </div>
+
+            <!-- Weekly Income Chart -->
+            <div class="section">
+                <h2>每周权利金</h2>
+                <div class="chart-wrap">
+                    <canvas id="weekly-chart" height="180"></canvas>
+                </div>
+            </div>
+
+            <!-- Trade History -->
+            <div class="section">
+                <h2>交易记录</h2>
+                <div id="trade-history"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const ENC = __ENCRYPTED_DATA__;
+
+        // Decrypt and render
+        async function unlock() {
+            const pwd = document.getElementById('pwd').value;
+            const errEl = document.getElementById('err');
+            errEl.textContent = '';
+            try {
+                const enc = new TextEncoder();
+                const km = await crypto.subtle.importKey('raw', enc.encode(pwd), { name: 'PBKDF2' }, false, ['deriveKey']);
+                const key = await crypto.subtle.deriveKey(
+                    { name: 'PBKDF2', salt: b64(ENC.salt), iterations: 100000, hash: 'SHA-256' },
+                    km,
+                    { name: 'AES-GCM', length: 256 },
+                    false,
+                    ['decrypt']
+                );
+                const ct = b64(ENC.data), tag = b64(ENC.tag);
+                const combined = new Uint8Array(ct.length + tag.length);
+                combined.set(ct); combined.set(tag, ct.length);
+                const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64(ENC.iv) }, key, combined);
+                const data = JSON.parse(new TextDecoder().decode(decrypted));
+
+                document.getElementById('lock').style.display = 'none';
+                document.getElementById('dashboard').style.display = 'block';
+                renderDashboard(data);
+            } catch (e) {
+                errEl.textContent = '密码错误';
+            }
+        }
+
+        function b64(s) { return Uint8Array.from(atob(s), c => c.charCodeAt(0)); }
+
+        document.getElementById('pwd').addEventListener('keypress', e => { if (e.key === 'Enter') unlock(); });
+
+        // ── Render ────────────────────────────────────────────────────────────
+
+        function renderDashboard(data) {
+            // Updated at
+            if (data.updatedAt) {
+                document.getElementById('updated-at').textContent = `更新于 ${data.updatedAt}`;
+            }
+
+            const open = data.openPositions || [];
+            const idle = data.idlePositions || [];
+            const closed = data.closedTrades || [];
+            const weekly = data.weeklyData || [];
+
+            const totalRealized = closed.reduce((s, t) => s + (t.premium || 0), 0);
+            const ccCount = open.filter(p => p.type === 'CC').length;
+            const cspCount = open.filter(p => p.type === 'CSP').length;
+
+            // Stats
+            document.getElementById('stats').innerHTML = `
+                <div class="stat-card">
+                    <div class="label">累计已实现</div>
+                    <div class="value green">$${totalRealized.toLocaleString()}</div>
+                    <div class="sub">${closed.length} 笔交易</div>
+                </div>
+                <div class="stat-card">
+                    <div class="label">在途持仓</div>
+                    <div class="value cyan">${open.length}</div>
+                    <div class="sub">${ccCount} CC · ${cspCount} CSP</div>
+                </div>
+                <div class="stat-card">
+                    <div class="label">可用现金</div>
+                    <div class="value blue">$${(data.cash || 0).toLocaleString()}</div>
+                    <div class="sub">账户现金</div>
+                </div>
+            `;
+
+            // Open positions
+            const openEl = document.getElementById('open-positions');
+            if (open.length === 0) {
+                openEl.innerHTML = '<div class="empty-note">暂无在途期权持仓</div>';
+            } else {
+                openEl.innerHTML = open.map(p => {
+                    const today = new Date();
+                    const expDate = new Date(p.expiry);
+                    const dte = Math.ceil((expDate - today) / 86400000);
+                    const dteClass = dte <= 2 ? 'dte-hot' : dte <= 7 ? 'dte-warm' : '';
+                    const dteLabel = dte <= 0 ? '已到期' : `${dte} DTE`;
+                    return `
+                        <div class="pos-card ${p.type}">
+                            <div class="pos-header">
+                                <div>
+                                    <span class="pos-ticker">${p.ticker}</span>
+                                    <span class="pos-badge ${p.type}">${p.type}</span>
+                                    <span style="font-size:14px; color:#6e7681; margin-left:6px;">$${p.strike}</span>
+                                </div>
+                                <span class="pos-premium">${p.premium > 0 ? '+$' + p.premium : '—'}</span>
+                            </div>
+                            <div class="pos-meta">
+                                <span>到期 ${p.expiry}</span>
+                                <span class="${dteClass}">${dteLabel}</span>
+                                ${p.contracts ? `<span>${p.contracts} 张</span>` : ''}
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            }
+
+            // Idle positions
+            const idleSection = document.getElementById('idle-section');
+            const idleEl = document.getElementById('idle-positions');
+            if (idle.length === 0) {
+                idleSection.style.display = 'none';
+            } else {
+                idleEl.innerHTML = `
+                    <table class="idle-table">
+                        <thead>
+                            <tr>
+                                <th>标的</th>
+                                <th>股数</th>
+                                <th>成本均价</th>
+                                <th>市值成本</th>
+                                <th>可卖 CC</th>
+                                <th>备注</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${idle.map(p => `
+                                <tr>
+                                    <td class="ticker-cell">${p.ticker}</td>
+                                    <td>${p.shares}</td>
+                                    <td>$${p.costBasis.toFixed(2)}</td>
+                                    <td>$${(p.shares * p.costBasis).toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
+                                    <td>${p.canSellCC ? '<span class="cc-yes">✓ 可卖</span>' : '<span class="cc-no">–</span>'}</td>
+                                    <td style="color:#6e7681; font-size:12px;">${p.note || ''}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                `;
+            }
+
+            // Weekly chart
+            const TARGET = 1000;
+            const labels = weekly.map(w => w.label.replace(' 到期周', ''));
+            const values = weekly.map(w => w.realized);
+            const colors = values.map(v => v >= TARGET ? 'rgba(63,185,80,0.75)' : 'rgba(57,210,192,0.65)');
+            const borders = values.map(v => v >= TARGET ? '#3fb950' : '#39d2c0');
+
+            new Chart(document.getElementById('weekly-chart').getContext('2d'), {
+                type: 'bar',
+                data: {
+                    labels,
+                    datasets: [{
+                        label: '权利金',
+                        data: values,
+                        backgroundColor: colors,
+                        borderColor: borders,
+                        borderWidth: 2,
+                        borderRadius: 5,
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: ctx => `$${ctx.parsed.y.toLocaleString()} · ${weekly[ctx.dataIndex].trades} 笔`
+                            }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            grid: { color: '#1e2733' },
+                            ticks: { color: '#6e7681', callback: v => '$' + v }
+                        },
+                        x: {
+                            grid: { display: false },
+                            ticks: { color: '#6e7681' }
+                        }
+                    }
+                },
+                plugins: [{
+                    id: 'targetLine',
+                    afterDatasetsDraw(chart) {
+                        const { ctx, scales: { y }, chartArea } = chart;
+                        const yPx = y.getPixelForValue(TARGET);
+                        ctx.save();
+                        ctx.strokeStyle = 'rgba(88,166,255,0.35)';
+                        ctx.lineWidth = 2;
+                        ctx.setLineDash([6, 4]);
+                        ctx.beginPath();
+                        ctx.moveTo(chartArea.left, yPx);
+                        ctx.lineTo(chartArea.right, yPx);
+                        ctx.stroke();
+                        ctx.restore();
+                    }
+                }]
+            });
+
+            // Trade history — group by expiryWeek, newest first
+            const byWeek = {};
+            for (const t of closed) {
+                const w = t.expiryWeek;
+                if (!byWeek[w]) byWeek[w] = [];
+                byWeek[w].push(t);
+            }
+
+            const sortedWeeks = Object.keys(byWeek).sort((a, b) => {
+                const toNum = w => { const [m, d] = w.split('/').map(Number); return m * 100 + d; };
+                return toNum(b) - toNum(a); // newest first
+            });
+
+            const histEl = document.getElementById('trade-history');
+            histEl.innerHTML = sortedWeeks.map((week, idx) => {
+                const trades = byWeek[week];
+                const total = trades.reduce((s, t) => s + t.premium, 0);
+                const id = `w${idx}`;
+                const negClass = total < 0 ? ' negative' : '';
+                const sign = total >= 0 ? '+' : '';
+                return `
+                    <div class="week-group">
+                        <div class="week-header" onclick="toggleWeek('${id}')">
+                            <div class="week-left">
+                                <span class="week-arrow" id="${id}-arrow">▶</span>
+                                <span class="week-title">${week} 到期周</span>
+                                <span class="week-count">${trades.length} 笔</span>
+                            </div>
+                            <span class="week-total${negClass}">${sign}$${Math.abs(total).toLocaleString()}</span>
+                        </div>
+                        <div class="week-trades" id="${id}">
+                            ${trades.map(t => {
+                                const sign = t.premium >= 0 ? '+' : '';
+                                const color = t.premium < 0 ? '#f85149' : '#3fb950';
+                                const assignBadge = t.assigned ? '<span class="trade-assigned">接货</span>' : '';
+                                return `
+                                    <div class="trade-row">
+                                        <div class="trade-left">
+                                            <span class="trade-ticker">${t.ticker} <span style="color:#6e7681;font-weight:400;">${t.type} $${t.strike}</span>${assignBadge}</span>
+                                            <span class="trade-detail">${t.result || ''}</span>
+                                        </div>
+                                        <span class="trade-premium" style="color:${color}">${sign}$${Math.abs(t.premium)}</span>
+                                    </div>
+                                `;
+                            }).join('')}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            // Auto-expand the most recent week
+            if (sortedWeeks.length > 0) toggleWeek('w0');
+        }
+
+        function toggleWeek(id) {
+            document.getElementById(id).classList.toggle('open');
+            document.getElementById(id + '-arrow').classList.toggle('open');
+        }
+    </script>
+</body>
+</html>

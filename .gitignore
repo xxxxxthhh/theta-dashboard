@@ -1,0 +1,4 @@
+portfolio_data.json
+.DS_Store
+node_modules/
+*.log
