@@ -12,7 +12,7 @@ jobs:
       - name: Checkout dashboard
         uses: actions/checkout@v4
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.GH_PAT }}
 
       - name: Checkout theta-data
         uses: actions/checkout@v4
@@ -38,7 +38,6 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git remote set-url origin https://x-access-token:${{ secrets.GH_PAT }}@github.com/xxxxxthhh/theta-dashboard.git
           git add index.html
           if ! git diff --cached --quiet; then
             git commit -m "build: update dashboard $(date '+%Y-%m-%d')"
