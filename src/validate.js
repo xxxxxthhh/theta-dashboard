@@ -55,11 +55,13 @@ function validatePortfolio(jsonPath) {
   }
 
   // weeklyData integrity: totals should match closedTrades
+  // Pending weeks store premium in pendingPremium (realized=0), skip realized check for those
   const computedByWeek = {};
   for (const t of closed) {
     computedByWeek[t.expiryWeek] = (computedByWeek[t.expiryWeek] || 0) + t.premium;
   }
   for (const w of (data.weeklyData || [])) {
+    if (w.pending) continue; // pending weeks are intentionally realized=0
     const computed = computedByWeek[w.week] || 0;
     const diff = Math.abs(w.realized - computed);
     if (diff > 0.01) {

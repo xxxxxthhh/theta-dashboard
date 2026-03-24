@@ -186,7 +186,9 @@
             const closed = data.closedTrades || [];
             const weekly = data.weeklyData || [];
 
-            const totalRealized = closed.reduce((s, t) => s + (t.premium || 0), 0);
+            const totalRealized = closed.filter(t => !/待到期/.test(t.result || '')).reduce((s, t) => s + (t.premium || 0), 0);
+            const realizedCount = closed.filter(t => !/待到期/.test(t.result || '')).length;
+            const pendingPremium = open.reduce((s, p) => s + (p.premium || 0), 0);
             const ccCount = open.filter(p => p.type === 'CC').length;
             const cspCount = open.filter(p => p.type === 'CSP').length;
 
@@ -195,7 +197,12 @@
                 <div class="stat-card">
                     <div class="label">累计已实现</div>
                     <div class="value green">$${totalRealized.toLocaleString()}</div>
-                    <div class="sub">${closed.length} 笔交易</div>
+                    <div class="sub">${realizedCount} 笔交易</div>
+                </div>
+                <div class="stat-card">
+                    <div class="label">在途权利金</div>
+                    <div class="value yellow">$${pendingPremium.toLocaleString()}</div>
+                    <div class="sub">${open.length} 张待确认</div>
                 </div>
                 <div class="stat-card">
                     <div class="label">在途持仓</div>
@@ -277,9 +284,9 @@
             // Weekly chart
             const TARGET = 1000;
             const labels = weekly.map(w => w.label.replace(' 到期周', ''));
-            const values = weekly.map(w => w.realized);
-            const colors = values.map(v => v >= TARGET ? 'rgba(63,185,80,0.75)' : 'rgba(57,210,192,0.65)');
-            const borders = values.map(v => v >= TARGET ? '#3fb950' : '#39d2c0');
+            const values = weekly.map(w => w.pending ? (w.pendingPremium || 0) : w.realized);
+            const colors = weekly.map((w, i) => w.pending ? 'rgba(210,153,34,0.55)' : (values[i] >= TARGET ? 'rgba(63,185,80,0.75)' : 'rgba(57,210,192,0.65)'));
+            const borders = weekly.map((w, i) => w.pending ? '#d29922' : (values[i] >= TARGET ? '#3fb950' : '#39d2c0'));
 
             new Chart(document.getElementById('weekly-chart').getContext('2d'), {
                 type: 'bar',
@@ -301,7 +308,10 @@
                         legend: { display: false },
                         tooltip: {
                             callbacks: {
-                                label: ctx => `$${ctx.parsed.y.toLocaleString()} · ${weekly[ctx.dataIndex].trades} 笔`
+                                label: ctx => {
+                                    const w = weekly[ctx.dataIndex];
+                                    return `$${ctx.parsed.y.toLocaleString()} · ${w.trades} 笔${w.pending ? ' · 待确认' : ''}`;
+                                }
                             }
                         }
                     },

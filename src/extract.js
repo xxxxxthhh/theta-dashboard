@@ -191,6 +191,24 @@ function extractFromMarkdown(mdPath, outPath) {
     return toNum(a) - toNum(b);
   });
 
+  // Mark pending weeks: weeks where every trade is "待到期" AND the week
+  // corresponds to an open position expiry date → show as unconfirmed in dashboard
+  const openWeekSet = new Set();
+  for (const pos of data.openPositions) {
+    if (!pos.expiry) continue;
+    const m = pos.expiry.match(/\d{4}-(\d+)-(\d+)/);
+    if (m) openWeekSet.add(`${parseInt(m[1])}/${parseInt(m[2])}`);
+  }
+  for (const entry of data.weeklyData) {
+    if (!openWeekSet.has(entry.week)) continue;
+    const weekTrades = data.closedTrades.filter(t => t.expiryWeek === entry.week);
+    if (weekTrades.length > 0 && weekTrades.every(t => /待到期/.test(t.result))) {
+      entry.pending = true;
+      entry.pendingPremium = entry.realized;
+      entry.realized = 0;
+    }
+  }
+
   // Cross-validate against summary table
   const warnings = [];
   for (const [weekLabel, summaryVal] of Object.entries(summaryByWeek)) {
