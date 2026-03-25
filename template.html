@@ -56,6 +56,13 @@
         .dte-hot { color: #f85149; }
         .dte-warm { color: #d29922; }
         .empty-note { color: #6e7681; font-size: 13px; font-style: italic; }
+        .buffer-safe { color: #3fb950; }
+        .buffer-warn { color: #d29922; }
+        .buffer-danger { color: #f85149; }
+        .pos-price-row { display: flex; align-items: center; gap: 12px; font-size: 12px; color: #6e7681; margin-top: 6px; }
+        .buffer-bar { flex: 1; max-width: 100px; height: 3px; background: #1e2733; border-radius: 2px; overflow: hidden; }
+        .buffer-bar-fill { height: 100%; border-radius: 2px; }
+        .market-data-ts { font-size: 10px; color: #484f58; text-align: right; margin-bottom: 8px; }
 
         /* Idle positions table */
         .idle-table { width: 100%; border-collapse: collapse; font-size: 13px; }
@@ -216,12 +223,37 @@
             if (open.length === 0) {
                 openEl.innerHTML = '<div class="empty-note">暂无在途期权持仓</div>';
             } else {
+                // 收盘价更新时间戳
+                if (data.marketDataAt) {
+                    const d = new Date(data.marketDataAt);
+                    const ts = d.toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' })
+                             + ' ' + d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+                    openEl.insertAdjacentHTML('beforebegin', `<div class="market-data-ts">收盘价更新于 ${ts} UTC</div>`);
+                }
                 openEl.innerHTML = open.map(p => {
                     const today = new Date();
                     const expDate = new Date(p.expiry);
                     const dte = Math.ceil((expDate - today) / 86400000);
                     const dteClass = dte <= 2 ? 'dte-hot' : dte <= 7 ? 'dte-warm' : '';
                     const dteLabel = dte <= 0 ? '已到期' : `${dte} DTE`;
+
+                    // Buffer 行（仅在有价格数据时渲染）
+                    let bufferHtml = '';
+                    if (p.lastPrice !== undefined && p.bufferPct !== undefined) {
+                        const bufClass = p.bufferPct > 5 ? 'buffer-safe' : p.bufferPct > 0 ? 'buffer-warn' : 'buffer-danger';
+                        const barColor = p.bufferPct > 5 ? '#3fb950' : p.bufferPct > 0 ? '#d29922' : '#f85149';
+                        // 0-10% buffer 映射到 0-100% 宽度
+                        const barWidth = Math.max(0, Math.min(100, p.bufferPct * 10));
+                        const sign = p.bufferPct >= 0 ? '+' : '';
+                        const itm = p.bufferPct < 0 ? ' ITM' : ' OTM';
+                        bufferHtml = `
+                            <div class="pos-price-row">
+                                <span>收盘 $${p.lastPrice.toFixed(2)}</span>
+                                <span class="${bufClass}">${sign}${p.bufferPct.toFixed(1)}%${itm}</span>
+                                <div class="buffer-bar"><div class="buffer-bar-fill" style="width:${barWidth}%;background:${barColor};"></div></div>
+                            </div>`;
+                    }
+
                     return `
                         <div class="pos-card ${p.type}">
                             <div class="pos-header">
@@ -237,6 +269,7 @@
                                 <span class="${dteClass}">${dteLabel}</span>
                                 ${p.contracts ? `<span>${p.contracts} 张</span>` : ''}
                             </div>
+                            ${bufferHtml}
                         </div>
                     `;
                 }).join('');

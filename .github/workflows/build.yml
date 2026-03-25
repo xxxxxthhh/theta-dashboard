@@ -22,7 +22,13 @@ jobs:
           path: theta-data
 
       - name: Copy source data
-        run: cp theta-data/options-history-since-feb.md .
+        run: |
+          cp theta-data/options-history-since-feb.md .
+          if [ -f theta-data/market_data.json ]; then
+            cp theta-data/market_data.json .
+          else
+            echo '{}' > market_data.json
+          fi
 
       - name: Setup Node.js
         uses: actions/setup-node@v4

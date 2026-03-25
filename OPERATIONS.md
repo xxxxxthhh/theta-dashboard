@@ -108,6 +108,56 @@ node src/build.js
 
 ---
 
+## 每日收盘价（市场数据）
+
+`market_data.json` 保存所有在途持仓标的的最新收盘价，由 theta-data 仓库中的脚本每日自动生成。
+
+### 文件格式
+
+```json
+{
+  "fetchedAt": "2026-03-25T21:30:00Z",
+  "prices": {
+    "AAPL": { "close": 248.50, "date": "2026-03-25" }
+  }
+}
+```
+
+### 自动触发流程
+
+1. GitHub Actions cron（theta-data，每周一至五 21:30 UTC）运行 `scripts/fetch_prices.py`
+2. 脚本写入 `market_data.json` 并 commit
+3. `trigger-dashboard.yml` 检测到变更，触发 theta-dashboard 重新构建
+4. `build.js` Step 2.5 将收盘价合并到 `openPositions`（计算 buffer），加密写入 `index.html`
+
+### 手动运行价格抓取
+
+```bash
+cd /Users/kyx/Documents/theta-data
+pip install yfinance   # 首次需要安装
+python scripts/fetch_prices.py
+```
+
+然后重新构建 dashboard：
+
+```bash
+cd /Users/kyx/Documents/theta-dashboard
+cp ../theta-data/market_data.json .
+export DASHBOARD_PASS="你的密码"
+node src/build.js
+```
+
+### Buffer 计算说明
+
+| 类型 | 计算公式 | 正值含义 |
+|------|----------|---------|
+| CC（Covered Call）| `strike - lastPrice` | 股价低于行权价（OTM，安全） |
+| CSP（Cash-Secured Put）| `lastPrice - strike` | 股价高于行权价（OTM，安全） |
+
+颜色阈值：绿色 > 5%，黄色 0-5%，红色 < 0%（ITM）
+
+---
+
 ## 安全注意事项
 
 - `portfolio_data.json` 已在 `.gitignore` 中排除，**永远不要手动 git add 它**
