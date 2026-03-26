@@ -226,9 +226,9 @@
                 // 收盘价更新时间戳
                 if (data.marketDataAt) {
                     const d = new Date(data.marketDataAt);
-                    const ts = d.toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' })
-                             + ' ' + d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
-                    openEl.insertAdjacentHTML('beforebegin', `<div class="market-data-ts">收盘价更新于 ${ts} UTC</div>`);
+                    const ts = d.toLocaleDateString('zh-CN', { timeZone: 'Asia/Shanghai', month: 'numeric', day: 'numeric' })
+                             + ' ' + d.toLocaleTimeString('zh-CN', { timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit' });
+                    openEl.insertAdjacentHTML('beforebegin', `<div class="market-data-ts">收盘价更新于 ${ts}</div>`);
                 }
                 openEl.innerHTML = open.map(p => {
                     const today = new Date();
