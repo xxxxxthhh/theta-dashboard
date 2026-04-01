@@ -18,6 +18,32 @@ function normalizeWeek(raw) {
   return raw.trim();
 }
 
+// Normalize expiry: "4/2" -> "2026-04-02", "2026-04-02" unchanged
+function normalizeExpiry(raw) {
+  const trimmed = raw.trim();
+  if (/^\d{4}-\d{1,2}-\d{1,2}$/.test(trimmed)) return trimmed;
+  const m = trimmed.match(/^(\d{1,2})\/(\d{1,2})$/);
+  if (m) {
+    const year = new Date().getFullYear();
+    return `${year}-${m[1].padStart(2, '0')}-${m[2].padStart(2, '0')}`;
+  }
+  return trimmed;
+}
+
+// Build column index map from open-position header row
+function buildOpenColMap(headerParts) {
+  const map = {};
+  for (let i = 0; i < headerParts.length; i++) {
+    const h = headerParts[i].toLowerCase();
+    if (h === '标的' || h === 'ticker') map.ticker = i;
+    else if (h === 'strike') map.strike = i;
+    else if (h.includes('到期')) map.expiry = i;
+    else if (h.includes('权利金') || h === 'premium') map.premium = i;
+    else if (h.includes('合约') || h === 'contracts') map.contracts = i;
+  }
+  return map;
+}
+
 function extractFromMarkdown(mdPath, outPath) {
   if (!fs.existsSync(mdPath)) {
     throw new Error(`Cannot find data source: ${mdPath}`);
@@ -50,6 +76,7 @@ function extractFromMarkdown(mdPath, outPath) {
   };
   let state = STATE.TOP;
   let currentWeek = null; // e.g. "2/13"
+  let openColMap = null;  // column index map for open position tables
 
   for (let i = 0; i < lines.length; i++) {
     const raw = lines[i];
@@ -89,6 +116,7 @@ function extractFromMarkdown(mdPath, outPath) {
       const openTypeMatch = line.match(/^####\s+(CC|CSP)\s*$/i);
       if (openTypeMatch) {
         state = openTypeMatch[1].toUpperCase() === 'CC' ? STATE.OPEN_CC : STATE.OPEN_CSP;
+        openColMap = null; // reset for each sub-section
         continue;
       }
     }
@@ -107,7 +135,14 @@ function extractFromMarkdown(mdPath, outPath) {
     if (!line.startsWith('|')) continue;
     const parts = line.split('|').map(s => s.trim()).filter(Boolean);
     if (parts.length === 0) continue;
-    // Skip header rows
+    // Detect open-position header rows and build column mapping
+    const isOpenHeader = (parts[0] === '标的' || parts[0].toLowerCase() === 'ticker') &&
+                         (state === STATE.OPEN_CC || state === STATE.OPEN_CSP);
+    if (isOpenHeader) {
+      openColMap = buildOpenColMap(parts);
+      continue;
+    }
+    // Skip other header rows
     if (parts[0] === '标的' || parts[0] === '到期周' || parts[0].startsWith('Ticker') || parts[0].startsWith('总计') || parts[0].startsWith('2月')) continue;
 
     if (state === STATE.SUMMARY_TABLE && parts.length >= 2) {
@@ -145,12 +180,14 @@ function extractFromMarkdown(mdPath, outPath) {
     }
 
     if ((state === STATE.OPEN_CC || state === STATE.OPEN_CSP) && parts.length >= 4) {
-      // | 标的 | Strike | 到期日 | 权利金 |
-      const ticker = parts[0];
-      const strike = Number(parts[1].replace(/[^0-9.]/g, ''));
-      const expiry = parts[2].trim();
-      const premium = parsePremium(parts[3]);
+      // Use column mapping if available, fallback to legacy positional order
+      const col = openColMap || { ticker: 0, strike: 1, expiry: 2, premium: 3 };
+      const ticker = parts[col.ticker != null ? col.ticker : 0];
+      const strike = Number((parts[col.strike != null ? col.strike : 1] || '').replace(/[^0-9.]/g, ''));
+      const expiryRaw = (parts[col.expiry != null ? col.expiry : 2] || '').trim();
+      const premium = parsePremium(parts[col.premium != null ? col.premium : 3]);
       const type = state === STATE.OPEN_CC ? 'CC' : 'CSP';
+      const expiry = normalizeExpiry(expiryRaw);
 
       if (ticker) {
         data.openPositions.push({ ticker, type, strike, expiry, premium, contracts: 1 });

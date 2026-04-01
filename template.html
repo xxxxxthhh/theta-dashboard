@@ -232,10 +232,11 @@
                 }
                 openEl.innerHTML = open.map(p => {
                     const today = new Date();
-                    const expDate = new Date(p.expiry);
-                    const dte = Math.ceil((expDate - today) / 86400000);
-                    const dteClass = dte <= 2 ? 'dte-hot' : dte <= 7 ? 'dte-warm' : '';
-                    const dteLabel = dte <= 0 ? '已到期' : `${dte} DTE`;
+                    today.setHours(0, 0, 0, 0);
+                    const expDate = new Date(p.expiry + 'T23:59:59');
+                    const dte = Number.isNaN(expDate.getTime()) ? null : Math.ceil((expDate - today) / 86400000);
+                    const dteClass = dte != null && dte <= 2 ? 'dte-hot' : dte != null && dte <= 7 ? 'dte-warm' : '';
+                    const dteLabel = dte == null ? '日期异常' : dte <= 0 ? '已到期' : `${dte} DTE`;
 
                     // Buffer 行（仅在有价格数据时渲染）
                     let bufferHtml = '';
