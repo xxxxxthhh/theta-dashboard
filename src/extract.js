@@ -280,8 +280,10 @@ function extractFromMarkdown(mdPath, outPath) {
 
 // Standalone execution
 if (require.main === module) {
+  const mdArg = process.argv[2] ? path.resolve(process.argv[2]) : MD_PATH;
+  const outArg = process.argv[3] ? path.resolve(process.argv[3]) : OUT_PATH;
   try {
-    extractFromMarkdown(MD_PATH, OUT_PATH);
+    extractFromMarkdown(mdArg, outArg);
   } catch (err) {
     console.error('❌', err.message);
     process.exit(1);
