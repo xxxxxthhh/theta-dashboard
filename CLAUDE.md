@@ -7,14 +7,18 @@ See `OPERATIONS.md` for data formats and workflows. Do not duplicate here.
 ## Build Rules
 
 - After modifying `src/*.js` or `template.html`, you MUST manually trigger a CI rebuild:
+
   ```bash
   gh workflow run build.yml
   ```
+
   CI only auto-triggers on theta-data updates. Dashboard source changes do NOT trigger a rebuild.
 
 - For local builds, set the environment variable first:
+
   ```bash
   export DASHBOARD_PASS="password"
+  export THETA_DATA_DIR="../theta-data"   # optional if theta-data is not in the default sibling path
   node src/build.js
   ```
 

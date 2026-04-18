@@ -1,165 +1,92 @@
 # Theta Dashboard — Agent 操作指南
 
-本项目是一个**期权卖方策略（Theta Gang）个人看板**，部署于 GitHub Pages，数据通过 AES-256-GCM 加密保护。
+本项目是一个 GitHub Pages 上的个人看板仓库。它只负责**消费 `theta-data` 的上游 JSON 并生成 `index.html`**。
 
-## 唯一数据源
-
-`options-history-since-feb.md` 是**唯一的真相源**。所有期权记录、在途持仓、持仓股票均写入此文件。
+数据格式、持仓编辑规则、端到端时序以 `theta-data/README.md` 为准；本文件只说明 dashboard 自己的构建和发布职责。
 
 ---
 
-## 数据源格式说明
+## 输入约定
 
-### 1. 历史到期记录（按到期周追加）
+本仓库构建时只读取两个上游文件：
 
-每新增一个到期周，在文件中追加以下格式：
+- `portfolio_data.json`
+- `market_data.json`
 
-```markdown
-#### 3/27 到期周
+`src/build.js` 的查找顺序如下：
 
-| 标的 | 类型 | Strike | 权利金 | 结果 |
-|---|---|---|---|---|
-| AAPL | CC | $262.5 | $180 | OTM 归零 ✅ |
-| PDD | CSP | $95 | $120 | OTM 归零 ✅ |
-| COIN | CSP | $175 | -$889 | 盘前止损 |
-| AMD | CSP | $180 | $95 | **ITM assign，接货 100 股** |
+1. `THETA_DATA_DIR`
+2. dashboard 仓库根目录下的本地覆盖文件
+3. 默认同级目录 `../theta-data`
 
-本周权利金收入：**$XXXX**
-```
-
-**字段说明：**
-- `类型`：`CC`（Covered Call）或 `CSP`（Cash-Secured Put）
-- `Strike`：行权价，如 `$262.5`
-- `权利金`：收到的权利金。负数表示亏损（如 `-$889`）；未记录填 `—`
-- `结果`：自由文本，含 "assign" 或 "接货" 的行会被标记为 `assigned: true`
+如果要修改交易记录或持仓，请先去 `theta-data` 仓库更新 Markdown 并重新生成 JSON。
 
 ---
 
-### 2. 在途持仓（当前持有但未到期的期权）
+## 本地构建
 
-在文件中添加或更新以下段落（覆盖上一次的在途持仓）：
-
-```markdown
-### 📝 在途持仓
-
-#### CC
-| 标的 | Strike | 到期日 | 权利金 |
-|---|---|---|---|
-| CRCL | $65 | 2026-06-18 | $0 |
-| AAPL | $260 | 2026-04-04 | $185 |
-
-#### CSP
-| 标的 | Strike | 到期日 | 权利金 |
-|---|---|---|---|
-| PDD | $95 | 2026-04-04 | $130 |
-```
-
-**注意**：到期日格式为 `YYYY-MM-DD`。
-
----
-
-### 3. 持仓股票（持有的股票，用于 Covered Call）
-
-```markdown
-### 📦 持仓股票
-
-| 标的 | 股数 | 成本 | 可卖CC | 备注 |
-|---|---|---|---|---|
-| AAPL | 100 | $257.00 | ✓ | |
-| PDD | 200 | $101.78 | ✓ | 原100股 + 3/20接货100股 |
-| AMZN | 10 | $212.50 | — | 不足100股 |
-```
-
----
-
-## 构建命令
-
-每次更新 `options-history-since-feb.md` 后运行：
-
-```bash
-# 设置密码（每次终端会话需要）
-export DASHBOARD_PASS="你的密码"
-
-# 构建（仅生成 index.html）
-node src/build.js
-
-# 或使用便捷脚本（自动构建）
-./build.sh
-
-# 构建 + 推送到 GitHub
-./build.sh --push
-```
-
----
-
-## 文件职责
-
-| 文件 | 说明 |
-|------|------|
-| `options-history-since-feb.md` | **唯一数据源** - 手动维护 |
-| `src/extract.js` | Markdown → `portfolio_data.json` |
-| `src/validate.js` | JSON Schema + 数据完整性校验 |
-| `src/encrypt.js` | AES-256-GCM 加密模块 |
-| `src/build.js` | 构建编排器（提取→校验→加密→注入） |
-| `build.sh` | 便捷 Shell 脚本（含可选 git push） |
-| `template.html` | 前端 Dashboard 模板 |
-| `index.html` | **构建产物**（提交到 Git，用于 GitHub Pages） |
-| `portfolio_data.json` | 中间产物（`.gitignore` 不提交） |
-
----
-
-## 每日收盘价（市场数据）
-
-`market_data.json` 保存所有在途持仓标的的最新收盘价，由 theta-data 仓库中的脚本每日自动生成。
-
-### 文件格式
-
-```json
-{
-  "fetchedAt": "2026-03-25T21:30:00Z",
-  "prices": {
-    "AAPL": { "close": 248.50, "date": "2026-03-25" }
-  }
-}
-```
-
-### 自动触发流程
-
-1. GitHub Actions cron（theta-data，每周一至五 21:30 UTC）运行 `scripts/fetch_prices.py`
-2. 脚本写入 `market_data.json` 并 commit
-3. `trigger-dashboard.yml` 检测到变更，触发 theta-dashboard 重新构建
-4. `build.js` Step 2.5 将收盘价合并到 `openPositions`（计算 buffer），加密写入 `index.html`
-
-### 手动运行价格抓取
+先确保上游 JSON 已经准备好：
 
 ```bash
 cd /Users/kyx/Documents/theta-data
-pip install yfinance   # 首次需要安装
-python scripts/fetch_prices.py
+node scripts/build_portfolio.js
 ```
 
-然后重新构建 dashboard：
+然后在 dashboard 仓库构建：
 
 ```bash
 cd /Users/kyx/Documents/theta-dashboard
-cp ../theta-data/market_data.json .
 export DASHBOARD_PASS="你的密码"
+export THETA_DATA_DIR="../theta-data"
 node src/build.js
 ```
 
-### Buffer 计算说明
+便捷命令：
 
-| 类型 | 计算公式 | 正值含义 |
-|------|----------|---------|
-| CC（Covered Call）| `strike - lastPrice` | 股价低于行权价（OTM，安全） |
-| CSP（Cash-Secured Put）| `lastPrice - strike` | 股价高于行权价（OTM，安全） |
+- `./build.sh` 只生成 `index.html`
+- `./build.sh --push` 生成后提交并推送 `index.html`
 
-颜色阈值：绿色 > 5%，黄色 0-5%，红色 < 0%（ITM）
+---
+
+## CI 行为
+
+- `theta-dashboard/.github/workflows/build.yml` 只在两种情况下运行：
+  - 收到 `repository_dispatch(data-updated)`
+  - 手工 `workflow_dispatch`
+- 修改 `src/*.js` 或 `template.html` 后，需要手工触发 CI 重建
+- 自动重建来自 `theta-data` 推送新的 `portfolio_data.json` 或 `market_data.json`
+
+---
+
+## 本仓库职责文件
+
+| 文件 | 说明 |
+| --- | --- |
+| `src/build.js` | 读取上游 JSON、校验、补充市场数据、加密并生成页面 |
+| `src/validate.js` | 在加密前校验上游 `portfolio_data.json` |
+| `src/encrypt.js` | AES-256-GCM 加密模块 |
+| `template.html` | 页面模板 |
+| `index.html` | 构建产物，提交到 GitHub Pages |
+| `build.sh` | 本地构建和可选推送脚本 |
+
+---
+
+## 本地覆盖和调试
+
+- `portfolio_data.json` 和 `market_data.json` 可以临时放在仓库根目录做本地覆盖
+- 这两个文件默认都被 `.gitignore` 排除，不应提交
+- `market_data.json` 用于补齐 `openPositions` 的 `lastPrice`、`bufferDollar` 和 `bufferPct`
+
+Buffer 计算：
+
+| 类型 | 公式 | 正值含义 |
+| --- | --- | --- |
+| CC | `strike - lastPrice` | 股价低于行权价 |
+| CSP | `lastPrice - strike` | 股价高于行权价 |
 
 ---
 
 ## 安全注意事项
 
-- `portfolio_data.json` 已在 `.gitignore` 中排除，**永远不要手动 git add 它**
-- `DASHBOARD_PASS` 只能通过环境变量传递，**永远不要硬编码到任何文件**
-- 没有密码，GitHub Pages 上的 `index.html` 只显示加密乱码
+- 永远不要硬编码 `DASHBOARD_PASS`
+- 没有密码，页面里的组合数据只会以加密 payload 形式存在

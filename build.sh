@@ -15,7 +15,7 @@ node src/build.js
 
 # Optional: git commit and push with --push flag
 if [[ "${1:-}" == "--push" ]]; then
-    git add index.html options-history-since-feb.md
+    git add index.html
     if ! git diff --cached --quiet; then
         git commit -m "build: update dashboard $(date '+%Y-%m-%d')"
         git push

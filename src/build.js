@@ -1,15 +1,35 @@
 'use strict';
 const fs = require('fs');
 const path = require('path');
-const { extractFromMarkdown } = require('./extract');
 const { validatePortfolio } = require('./validate');
 const { encrypt } = require('./encrypt');
 
 const ROOT = path.join(__dirname, '..');
-const MD_PATH = path.join(ROOT, 'options-history-since-feb.md');
-const JSON_PATH = path.join(ROOT, 'portfolio_data.json');
 const TEMPLATE_PATH = path.join(ROOT, 'template.html');
 const OUT_PATH = path.join(ROOT, 'index.html');
+
+function getCandidateDataDirs() {
+  const dirs = [];
+  if (process.env.THETA_DATA_DIR) dirs.push(path.resolve(ROOT, process.env.THETA_DATA_DIR));
+  dirs.push(ROOT);
+  dirs.push(path.resolve(ROOT, '..', 'theta-data'));
+
+  return [...new Set(dirs)];
+}
+
+function resolveDataFile(name, required) {
+  for (const dir of getCandidateDataDirs()) {
+    const candidate = path.join(dir, name);
+    if (fs.existsSync(candidate)) return candidate;
+  }
+
+  if (!required) return null;
+
+  throw new Error(
+    `${name} not found. Checked: ${getCandidateDataDirs().join(', ')}. ` +
+    'Set THETA_DATA_DIR if the theta-data checkout is elsewhere.'
+  );
+}
 
 function build() {
   const password = process.env.DASHBOARD_PASS;
@@ -17,20 +37,23 @@ function build() {
     throw new Error('DASHBOARD_PASS environment variable is not set');
   }
 
-  // Step 1: Extract
-  console.log('→ Step 1: Extracting data from Markdown...');
-  extractFromMarkdown(MD_PATH, JSON_PATH);
+  const jsonPath = resolveDataFile('portfolio_data.json', true);
+  const marketPath = resolveDataFile('market_data.json', false);
+
+  // Step 1: Load upstream data
+  console.log('→ Step 1: Loading upstream portfolio data...');
+  console.log(`   Using ${jsonPath}`);
 
   // Step 2: Validate
   console.log('\n→ Step 2: Validating portfolio data...');
-  const data = validatePortfolio(JSON_PATH);
+  const data = validatePortfolio(jsonPath);
 
-  // Step 2.5: Enrich with market price data
-  console.log('\n→ Step 2.5: Enriching with market prices...');
-  const MARKET_PATH = path.join(ROOT, 'market_data.json');
-  if (fs.existsSync(MARKET_PATH)) {
+  // Step 3: Enrich with market price data
+  console.log('\n→ Step 3: Enriching with market prices...');
+  if (marketPath) {
     try {
-      const marketData = JSON.parse(fs.readFileSync(MARKET_PATH, 'utf8'));
+      console.log(`   Using ${marketPath}`);
+      const marketData = JSON.parse(fs.readFileSync(marketPath, 'utf8'));
       const prices = marketData.prices || {};
       let enriched = 0;
       for (const pos of data.openPositions) {
@@ -55,17 +78,17 @@ function build() {
       console.warn(`   Warning: could not read market_data.json - ${err.message}`);
     }
   } else {
-    console.log('   No market_data.json found, skipping enrichment');
+    console.log('   No market_data.json found in upstream data dir, skipping enrichment');
   }
 
-  // Step 3: Encrypt
-  console.log('\n→ Step 3: Encrypting...');
+  // Step 4: Encrypt
+  console.log('\n→ Step 4: Encrypting...');
   const enc = encrypt(data, password);
   const jsonSize = JSON.stringify(data).length;
   console.log(`   Raw data: ${jsonSize} bytes → Encrypted: ${enc.data.length} chars`);
 
-  // Step 4: Inject into template
-  console.log('\n→ Step 4: Building index.html...');
+  // Step 5: Inject into template
+  console.log('\n→ Step 5: Building index.html...');
   if (!fs.existsSync(TEMPLATE_PATH)) {
     throw new Error(`template.html not found at ${TEMPLATE_PATH}`);
   }
