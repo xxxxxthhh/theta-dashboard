@@ -3,33 +3,11 @@ const fs = require('fs');
 const path = require('path');
 const { validatePortfolio } = require('./validate');
 const { encrypt } = require('./encrypt');
+const { resolveDataFile, enrichPortfolioWithMarketData } = require('./data-loader');
 
 const ROOT = path.join(__dirname, '..');
 const TEMPLATE_PATH = path.join(ROOT, 'template.html');
 const OUT_PATH = path.join(ROOT, 'index.html');
-
-function getCandidateDataDirs() {
-  const dirs = [];
-  if (process.env.THETA_DATA_DIR) dirs.push(path.resolve(ROOT, process.env.THETA_DATA_DIR));
-  dirs.push(ROOT);
-  dirs.push(path.resolve(ROOT, '..', 'theta-data'));
-
-  return [...new Set(dirs)];
-}
-
-function resolveDataFile(name, required) {
-  for (const dir of getCandidateDataDirs()) {
-    const candidate = path.join(dir, name);
-    if (fs.existsSync(candidate)) return candidate;
-  }
-
-  if (!required) return null;
-
-  throw new Error(
-    `${name} not found. Checked: ${getCandidateDataDirs().join(', ')}. ` +
-    'Set THETA_DATA_DIR if the theta-data checkout is elsewhere.'
-  );
-}
 
 function build() {
   const password = process.env.DASHBOARD_PASS;
@@ -37,8 +15,8 @@ function build() {
     throw new Error('DASHBOARD_PASS environment variable is not set');
   }
 
-  const jsonPath = resolveDataFile('portfolio_data.json', true);
-  const marketPath = resolveDataFile('market_data.json', false);
+  const jsonPath = resolveDataFile(ROOT, 'portfolio_data.json', true);
+  const marketPath = resolveDataFile(ROOT, 'market_data.json', false);
 
   // Step 1: Load upstream data
   console.log('→ Step 1: Loading upstream portfolio data...');
@@ -53,27 +31,9 @@ function build() {
   if (marketPath) {
     try {
       console.log(`   Using ${marketPath}`);
-      const marketData = JSON.parse(fs.readFileSync(marketPath, 'utf8'));
-      const prices = marketData.prices || {};
-      let enriched = 0;
-      for (const pos of data.openPositions) {
-        const info = prices[pos.ticker];
-        if (info && typeof info.close === 'number') {
-          pos.lastPrice = info.close;
-          pos.priceDate = info.date;
-          if (pos.type === 'CC') {
-            // CC: 股价低于行权价为安全（OTM）
-            pos.bufferDollar = +(pos.strike - info.close).toFixed(2);
-          } else if (pos.type === 'CSP') {
-            // CSP: 股价高于行权价为安全（OTM）
-            pos.bufferDollar = +(info.close - pos.strike).toFixed(2);
-          }
-          pos.bufferPct = +(pos.bufferDollar / info.close * 100).toFixed(2);
-          enriched++;
-        }
-      }
-      if (marketData.fetchedAt) data.marketDataAt = marketData.fetchedAt;
-      console.log(`   Enriched ${enriched}/${data.openPositions.length} positions`);
+      const { openEnriched, idleEnriched } = enrichPortfolioWithMarketData(data, marketPath);
+      console.log(`   Enriched ${openEnriched}/${data.openPositions.length} open positions`);
+      console.log(`   Enriched ${idleEnriched}/${data.idlePositions.length} idle holdings`);
     } catch (err) {
       console.warn(`   Warning: could not read market_data.json - ${err.message}`);
     }

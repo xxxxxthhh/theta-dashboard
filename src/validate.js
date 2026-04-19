@@ -49,8 +49,20 @@ function validatePortfolio(jsonPath) {
   } else {
     for (const t of closed) {
       if (!t.ticker) errors.push(`Closed trade missing ticker: ${JSON.stringify(t)}`);
+      if (!t.type || !['CC', 'CSP'].includes(t.type)) errors.push(`Closed trade invalid type "${t.type}": ${t.ticker} ${t.expiryWeek || ''}`);
       if (!t.expiryWeek) errors.push(`Closed trade missing expiryWeek: ${t.ticker}`);
       if (typeof t.premium !== 'number' || !Number.isFinite(t.premium)) errors.push(`Closed trade premium not finite: ${t.ticker} ${t.expiryWeek}`);
+      if (typeof t.assigned !== 'boolean') errors.push(`Closed trade assigned flag must be boolean: ${t.ticker} ${t.expiryWeek}`);
+      if (typeof t.outcomeCategory !== 'string' || !t.outcomeCategory) errors.push(`Closed trade missing outcomeCategory: ${t.ticker} ${t.expiryWeek}`);
+      if (typeof t.outcomeLabel !== 'string' || !t.outcomeLabel) errors.push(`Closed trade missing outcomeLabel: ${t.ticker} ${t.expiryWeek}`);
+      if (typeof t.lifecycle !== 'string' || !t.lifecycle) errors.push(`Closed trade missing lifecycle: ${t.ticker} ${t.expiryWeek}`);
+      if (typeof t.lifecycleLabel !== 'string' || !t.lifecycleLabel) errors.push(`Closed trade missing lifecycleLabel: ${t.ticker} ${t.expiryWeek}`);
+      if (t.assignmentDirection != null && !['call-away', 'receive-shares'].includes(t.assignmentDirection)) {
+        errors.push(`Closed trade invalid assignmentDirection "${t.assignmentDirection}": ${t.ticker} ${t.expiryWeek}`);
+      }
+      if (t.assignmentDirection && (typeof t.assignmentLabel !== 'string' || !t.assignmentLabel)) {
+        errors.push(`Closed trade missing assignmentLabel: ${t.ticker} ${t.expiryWeek}`);
+      }
     }
   }
 
