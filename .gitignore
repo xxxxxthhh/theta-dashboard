@@ -1,6 +1,7 @@
 portfolio_data.json
 market_data.json
 options-history-since-feb.md
+local-analytics.html
 .DS_Store
 node_modules/
 *.log

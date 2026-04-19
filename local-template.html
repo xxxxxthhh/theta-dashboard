@@ -1,0 +1,1199 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Theta Gang Local Analytics</title>
+    <link rel="icon" type="image/svg+xml" href="icon.svg">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <style>
+        :root {
+            --bg: #f4efe6;
+            --panel: rgba(255, 252, 247, 0.82);
+            --panel-strong: rgba(255, 252, 247, 0.94);
+            --ink: #1d2430;
+            --muted: #667085;
+            --line: rgba(29, 36, 48, 0.12);
+            --teal: #0f766e;
+            --teal-soft: rgba(15, 118, 110, 0.12);
+            --orange: #b45309;
+            --orange-soft: rgba(180, 83, 9, 0.12);
+            --blue: #1d4ed8;
+            --blue-soft: rgba(29, 78, 216, 0.12);
+            --red: #b42318;
+            --red-soft: rgba(180, 35, 24, 0.12);
+            --slate: #475467;
+            --slate-soft: rgba(71, 84, 103, 0.12);
+            --gold: #ca8a04;
+            --gold-soft: rgba(202, 138, 4, 0.14);
+            --shadow: 0 18px 40px rgba(53, 40, 24, 0.08);
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            font-family: 'Avenir Next', 'Segoe UI', sans-serif;
+            color: var(--ink);
+            background:
+                radial-gradient(circle at top left, rgba(15, 118, 110, 0.16), transparent 30%),
+                radial-gradient(circle at top right, rgba(180, 83, 9, 0.16), transparent 30%),
+                linear-gradient(180deg, #f8f4ec 0%, var(--bg) 42%, #efe8dc 100%);
+            line-height: 1.5;
+        }
+
+        h1, h2, h3 {
+            margin: 0;
+            font-family: 'Iowan Old Style', 'Palatino Linotype', serif;
+            letter-spacing: 0.01em;
+        }
+
+        p { margin: 0; }
+
+        .shell {
+            max-width: 1240px;
+            margin: 0 auto;
+            padding: 28px 18px 64px;
+        }
+
+        .hero {
+            display: grid;
+            grid-template-columns: minmax(0, 1.7fr) minmax(280px, 0.9fr);
+            gap: 18px;
+            margin-bottom: 18px;
+        }
+
+        .panel {
+            background: var(--panel);
+            border: 1px solid rgba(255, 255, 255, 0.6);
+            border-radius: 24px;
+            box-shadow: var(--shadow);
+            backdrop-filter: blur(12px);
+        }
+
+        .hero-main {
+            padding: 28px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .hero-main::after {
+            content: '';
+            position: absolute;
+            inset: auto -80px -110px auto;
+            width: 240px;
+            height: 240px;
+            background: radial-gradient(circle, rgba(15, 118, 110, 0.18), transparent 68%);
+            pointer-events: none;
+        }
+
+        .eyebrow {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 12px;
+            border-radius: 999px;
+            background: rgba(29, 36, 48, 0.06);
+            color: var(--muted);
+            font-size: 12px;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            margin-bottom: 16px;
+        }
+
+        .hero-title {
+            font-size: clamp(2rem, 5vw, 3.4rem);
+            line-height: 0.95;
+            margin-bottom: 14px;
+        }
+
+        .hero-copy {
+            max-width: 56ch;
+            color: var(--slate);
+            font-size: 15px;
+        }
+
+        .hero-meta {
+            display: grid;
+            gap: 12px;
+            padding: 22px;
+        }
+
+        .meta-card {
+            background: var(--panel-strong);
+            border: 1px solid var(--line);
+            border-radius: 18px;
+            padding: 16px 18px;
+        }
+
+        .meta-card .label,
+        .stat-card .label,
+        .mini-card .label,
+        .metric .label,
+        .section-head .kicker {
+            color: var(--muted);
+            font-size: 11px;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        .meta-card .value {
+            margin-top: 6px;
+            font-size: 15px;
+            font-weight: 700;
+        }
+
+        .meta-card .sub {
+            margin-top: 6px;
+            color: var(--muted);
+            font-size: 12px;
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 14px;
+            margin-bottom: 22px;
+        }
+
+        .stat-card {
+            padding: 18px;
+            border-radius: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.7);
+            background: var(--panel-strong);
+            box-shadow: var(--shadow);
+        }
+
+        .stat-card .value {
+            margin-top: 10px;
+            font-size: 30px;
+            font-weight: 800;
+            line-height: 1;
+        }
+
+        .stat-card .sub {
+            margin-top: 10px;
+            color: var(--muted);
+            font-size: 13px;
+        }
+
+        .section {
+            margin-top: 24px;
+        }
+
+        .section-head {
+            display: flex;
+            align-items: end;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 14px;
+            padding: 0 4px;
+        }
+
+        .section-head h2 {
+            font-size: 28px;
+        }
+
+        .section-head .summary {
+            color: var(--muted);
+            font-size: 13px;
+            text-align: right;
+        }
+
+        .grid-2 {
+            display: grid;
+            grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.95fr);
+            gap: 18px;
+        }
+
+        .block {
+            padding: 22px;
+        }
+
+        .chart-shell {
+            height: 320px;
+        }
+
+        .mini-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 12px;
+        }
+
+        .mini-card {
+            padding: 16px;
+            border-radius: 18px;
+            background: var(--panel-strong);
+            border: 1px solid var(--line);
+        }
+
+        .mini-card .value {
+            margin-top: 8px;
+            font-size: 20px;
+            font-weight: 800;
+        }
+
+        .mini-card .sub {
+            margin-top: 6px;
+            color: var(--muted);
+            font-size: 12px;
+        }
+
+        .month-strip {
+            display: grid;
+            gap: 10px;
+            margin-top: 14px;
+        }
+
+        .month-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 14px;
+            border-radius: 16px;
+            background: var(--panel-strong);
+            border: 1px solid var(--line);
+        }
+
+        .month-item .month {
+            font-weight: 700;
+        }
+
+        .month-item .share {
+            color: var(--muted);
+            font-size: 12px;
+        }
+
+        .insight-note {
+            margin-top: 14px;
+            padding: 14px 16px;
+            border-radius: 18px;
+            background: linear-gradient(135deg, rgba(15, 118, 110, 0.1), rgba(202, 138, 4, 0.12));
+            color: var(--slate);
+            font-size: 13px;
+        }
+
+        .table-wrap {
+            overflow-x: auto;
+            margin-top: 16px;
+            border-radius: 18px;
+            border: 1px solid var(--line);
+            background: var(--panel-strong);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            min-width: 780px;
+        }
+
+        th, td {
+            padding: 14px 16px;
+            text-align: left;
+            border-bottom: 1px solid var(--line);
+            vertical-align: top;
+        }
+
+        th {
+            color: var(--muted);
+            font-size: 11px;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            background: rgba(255, 255, 255, 0.55);
+        }
+
+        tbody tr:last-child td { border-bottom: none; }
+
+        .ticker {
+            font-weight: 800;
+            font-size: 15px;
+        }
+
+        .muted {
+            color: var(--muted);
+        }
+
+        .metric-row {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 10px;
+            margin-top: 18px;
+        }
+
+        .metric {
+            padding: 14px 12px;
+            border-radius: 16px;
+            background: var(--panel-strong);
+            border: 1px solid var(--line);
+        }
+
+        .metric .value {
+            margin-top: 6px;
+            font-size: 22px;
+            font-weight: 800;
+        }
+
+        .pill-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            border-radius: 999px;
+            padding: 6px 10px;
+            font-size: 12px;
+            font-weight: 700;
+            white-space: nowrap;
+        }
+
+        .pill-positive { background: var(--teal-soft); color: var(--teal); }
+        .pill-warning { background: var(--orange-soft); color: var(--orange); }
+        .pill-accent { background: var(--blue-soft); color: var(--blue); }
+        .pill-loss { background: var(--red-soft); color: var(--red); }
+        .pill-muted { background: var(--slate-soft); color: var(--slate); }
+        .pill-gold { background: var(--gold-soft); color: var(--gold); }
+
+        .strategy-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 18px;
+        }
+
+        .strategy-card {
+            padding: 22px;
+        }
+
+        .strategy-title {
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            gap: 12px;
+        }
+
+        .strategy-title h3 {
+            font-size: 26px;
+        }
+
+        .strategy-title .sub {
+            color: var(--muted);
+            font-size: 13px;
+        }
+
+        .legend {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 16px;
+        }
+
+        .legend .pill { font-weight: 600; }
+
+        .footnote {
+            color: var(--muted);
+            font-size: 12px;
+            margin-top: 12px;
+        }
+
+        .snapshot-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 18px;
+        }
+
+        .nowrap { white-space: nowrap; }
+
+        .positive { color: var(--teal); }
+        .negative { color: var(--red); }
+
+        @media (max-width: 1024px) {
+            .hero,
+            .grid-2,
+            .strategy-grid,
+            .snapshot-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .stats,
+            .metric-row {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+        }
+
+        @media (max-width: 640px) {
+            .shell { padding-inline: 14px; }
+
+            .hero-main,
+            .hero-meta,
+            .block,
+            .strategy-card {
+                padding: 18px;
+            }
+
+            .stats,
+            .metric-row,
+            .mini-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .section-head {
+                align-items: start;
+                flex-direction: column;
+            }
+
+            .section-head .summary {
+                text-align: left;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="shell">
+        <section class="hero">
+            <div class="panel hero-main">
+                <div class="eyebrow">Local Only · Deep Review</div>
+                <h1 class="hero-title">Theta Gang<br>本地复盘台</h1>
+                <p class="hero-copy">这页只服务本地深度分析，不做加密发布。重点回答三个问题：谁在真正贡献利润、CC 与 CSP 的结构效率如何、收益集中在哪些时间窗口。</p>
+            </div>
+            <div class="panel hero-meta" id="hero-meta"></div>
+        </section>
+
+        <section class="stats" id="stats"></section>
+
+        <section class="section">
+            <div class="section-head">
+                <div>
+                    <div class="kicker">Time Review</div>
+                    <h2>时间复盘</h2>
+                </div>
+                <div class="summary">周度 realized bar + 累计 realized line，用来看收益密度和节奏切换。</div>
+            </div>
+            <div class="grid-2">
+                <div class="panel block">
+                    <div class="chart-shell"><canvas id="performance-chart"></canvas></div>
+                </div>
+                <div class="panel block">
+                    <div class="mini-grid" id="monthly-summary"></div>
+                    <div class="insight-note" id="time-insight"></div>
+                </div>
+            </div>
+        </section>
+
+        <section class="section">
+            <div class="section-head">
+                <div>
+                    <div class="kicker">Underlying Lens</div>
+                    <h2>分标的贡献</h2>
+                </div>
+                <div class="summary">按 realized premium 排序，同时看 contribution、Win-Like 和 assignment rate。</div>
+            </div>
+            <div class="grid-2">
+                <div class="panel block">
+                    <div class="chart-shell"><canvas id="symbol-chart"></canvas></div>
+                </div>
+                <div class="panel block">
+                    <div class="metric-row" id="symbol-highlights"></div>
+                    <div class="insight-note" id="symbol-insight"></div>
+                </div>
+            </div>
+            <div class="panel block">
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>标的</th>
+                                <th>已实现</th>
+                                <th>贡献</th>
+                                <th>交易</th>
+                                <th>均值 / 笔</th>
+                                <th>Win-Like</th>
+                                <th>Assignment</th>
+                                <th>Lifecycle Mix</th>
+                                <th>当前上下文</th>
+                            </tr>
+                        </thead>
+                        <tbody id="symbol-table"></tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <section class="section">
+            <div class="section-head">
+                <div>
+                    <div class="kicker">Strategy Lens</div>
+                    <h2>CC / CSP 复盘</h2>
+                </div>
+                <div class="summary">Win-Like = Expire Worthless + Take Profit；assignment 单独看，不强行混成胜率。</div>
+            </div>
+            <div class="grid-2">
+                <div class="strategy-grid" id="strategy-cards"></div>
+                <div class="panel block">
+                    <div class="chart-shell" style="height: 280px;"><canvas id="outcome-chart"></canvas></div>
+                    <div class="legend" id="outcome-legend"></div>
+                    <div class="footnote">Outcome Mix 聚合的是整个 closed trade ledger，用来补足“这段时间到底是 Expire Worthless、Call Away 还是 Receive Shares 为主”这个过程视角。</div>
+                </div>
+            </div>
+        </section>
+
+        <section class="section">
+            <div class="section-head">
+                <div>
+                    <div class="kicker">Current Book</div>
+                    <h2>当前仓位快照</h2>
+                </div>
+                <div class="summary">把 open positions 和 idle holdings 放在一起看，便于把历史复盘和当前持仓衔接起来。</div>
+            </div>
+            <div class="snapshot-grid">
+                <div class="panel block">
+                    <h3 style="font-size:24px; margin-bottom: 14px;">Open Positions</h3>
+                    <div class="table-wrap">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>标的</th>
+                                    <th>类型</th>
+                                    <th>Strike</th>
+                                    <th>到期</th>
+                                    <th>权利金</th>
+                                    <th>收盘</th>
+                                    <th>Buffer</th>
+                                </tr>
+                            </thead>
+                            <tbody id="open-table"></tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="panel block">
+                    <h3 style="font-size:24px; margin-bottom: 14px;">Idle Holdings</h3>
+                    <div class="table-wrap">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>标的</th>
+                                    <th>股数</th>
+                                    <th>成本</th>
+                                    <th>收盘</th>
+                                    <th>未实现</th>
+                                    <th>备注</th>
+                                </tr>
+                            </thead>
+                            <tbody id="idle-table"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <script>
+        const DATA = __LOCAL_DATA__;
+
+        const lifecycleOrder = [
+            'expire-worthless',
+            'call-away',
+            'receive-shares',
+            'take-profit',
+            'stop-loss',
+            'expired',
+            'pending',
+            'other',
+        ];
+
+        const lifecycleText = {
+            'expire-worthless': 'Expire Worthless',
+            'call-away': 'Call Away',
+            'receive-shares': 'Receive Shares',
+            'take-profit': 'Take Profit',
+            'stop-loss': 'Stop Loss',
+            'expired': 'Expired',
+            'pending': 'Pending',
+            'other': 'Other',
+        };
+
+        const lifecycleTone = {
+            'expire-worthless': 'positive',
+            'call-away': 'warning',
+            'receive-shares': 'accent',
+            'take-profit': 'gold',
+            'stop-loss': 'loss',
+            'expired': 'muted',
+            'pending': 'muted',
+            'other': 'muted',
+        };
+
+        const lifecycleColors = {
+            'expire-worthless': '#0f766e',
+            'call-away': '#b45309',
+            'receive-shares': '#1d4ed8',
+            'take-profit': '#ca8a04',
+            'stop-loss': '#b42318',
+            'expired': '#475467',
+            'pending': '#98a2b3',
+            'other': '#667085',
+        };
+
+        function formatMoney(value, digits = 0) {
+            if (!Number.isFinite(value)) return '—';
+            return new Intl.NumberFormat('en-US', {
+                style: 'currency',
+                currency: 'USD',
+                minimumFractionDigits: digits,
+                maximumFractionDigits: digits,
+            }).format(value);
+        }
+
+        function formatPct(value, digits = 1) {
+            if (!Number.isFinite(value)) return '—';
+            return `${value.toFixed(digits)}%`;
+        }
+
+        function escapeHtml(value) {
+            return String(value || '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        function toWeekNumber(week) {
+            const [month, day] = week.split('/').map(Number);
+            return month * 100 + day;
+        }
+
+        function lifecyclePills(counts) {
+            return lifecycleOrder
+                .filter((key) => counts[key])
+                .map((key) => `<span class="pill pill-${lifecycleTone[key]}">${lifecycleText[key]} ${counts[key]}</span>`)
+                .join('');
+        }
+
+        function buildMonthlySummary(weeklyData, totalRealized) {
+            const map = new Map();
+            for (const item of weeklyData) {
+                const [month] = item.week.split('/').map(Number);
+                const key = `${month}月`;
+                if (!map.has(key)) map.set(key, { month, label: key, realized: 0, trades: 0 });
+                const entry = map.get(key);
+                entry.realized += item.pending ? (item.pendingPremium || 0) : (item.realized || 0);
+                entry.trades += item.trades || 0;
+            }
+            return [...map.values()]
+                .sort((a, b) => a.month - b.month)
+                .map((item) => ({
+                    ...item,
+                    sharePct: totalRealized === 0 ? 0 : (item.realized / totalRealized) * 100,
+                }));
+        }
+
+        function buildSymbolAnalytics(data) {
+            const idleByTicker = Object.fromEntries((data.idlePositions || []).map((position) => [position.ticker, position]));
+            const openByTicker = {};
+            for (const position of data.openPositions || []) {
+                if (!openByTicker[position.ticker]) openByTicker[position.ticker] = [];
+                openByTicker[position.ticker].push(position);
+            }
+
+            const totals = {
+                realized: (data.closedTrades || []).reduce((sum, trade) => sum + (trade.premium || 0), 0),
+            };
+
+            const map = new Map();
+            for (const trade of data.closedTrades || []) {
+                if (!map.has(trade.ticker)) {
+                    map.set(trade.ticker, {
+                        ticker: trade.ticker,
+                        realized: 0,
+                        trades: 0,
+                        ccTrades: 0,
+                        cspTrades: 0,
+                        assigned: 0,
+                        winLike: 0,
+                        lifecycleCounts: {},
+                        weeks: new Set(),
+                    });
+                }
+
+                const entry = map.get(trade.ticker);
+                entry.realized += trade.premium || 0;
+                entry.trades += 1;
+                entry.weeks.add(trade.expiryWeek);
+                if (trade.type === 'CC') entry.ccTrades += 1;
+                if (trade.type === 'CSP') entry.cspTrades += 1;
+                if (trade.assigned) entry.assigned += 1;
+                if (trade.lifecycle === 'expire-worthless' || trade.lifecycle === 'take-profit') entry.winLike += 1;
+                entry.lifecycleCounts[trade.lifecycle] = (entry.lifecycleCounts[trade.lifecycle] || 0) + 1;
+            }
+
+            return [...map.values()]
+                .map((entry) => {
+                    const holding = idleByTicker[entry.ticker] || null;
+                    const openPositions = openByTicker[entry.ticker] || [];
+                    return {
+                        ...entry,
+                        avgPremium: entry.trades === 0 ? 0 : entry.realized / entry.trades,
+                        contributionPct: totals.realized === 0 ? 0 : (entry.realized / totals.realized) * 100,
+                        assignmentRate: entry.trades === 0 ? 0 : (entry.assigned / entry.trades) * 100,
+                        winLikeRate: entry.trades === 0 ? 0 : (entry.winLike / entry.trades) * 100,
+                        weekCount: entry.weeks.size,
+                        holding,
+                        openPositions,
+                    };
+                })
+                .sort((a, b) => b.realized - a.realized || b.trades - a.trades);
+        }
+
+        function buildStrategyAnalytics(closedTrades) {
+            return ['CC', 'CSP'].map((type) => {
+                const trades = closedTrades.filter((trade) => trade.type === type);
+                const realized = trades.reduce((sum, trade) => sum + (trade.premium || 0), 0);
+                const lifecycleCounts = {};
+                const tickerProfit = {};
+                let assignmentCount = 0;
+                let winLikeCount = 0;
+
+                for (const trade of trades) {
+                    lifecycleCounts[trade.lifecycle] = (lifecycleCounts[trade.lifecycle] || 0) + 1;
+                    tickerProfit[trade.ticker] = (tickerProfit[trade.ticker] || 0) + (trade.premium || 0);
+                    if (trade.assigned) assignmentCount += 1;
+                    if (trade.lifecycle === 'expire-worthless' || trade.lifecycle === 'take-profit') winLikeCount += 1;
+                }
+
+                const hedgeKey = type === 'CC' ? 'call-away' : 'receive-shares';
+                const avoidedAssignment = trades.length - (lifecycleCounts[hedgeKey] || 0);
+                const topTicker = Object.entries(tickerProfit).sort((a, b) => b[1] - a[1])[0] || null;
+
+                return {
+                    type,
+                    trades: trades.length,
+                    realized,
+                    avgPremium: trades.length === 0 ? 0 : realized / trades.length,
+                    assignmentCount,
+                    assignmentRate: trades.length === 0 ? 0 : (assignmentCount / trades.length) * 100,
+                    winLikeRate: trades.length === 0 ? 0 : (winLikeCount / trades.length) * 100,
+                    protectedRate: trades.length === 0 ? 0 : (avoidedAssignment / trades.length) * 100,
+                    protectedLabel: type === 'CC' ? 'Stock Kept' : 'No Assignment',
+                    assignmentLabel: type === 'CC' ? 'Call Away' : 'Receive Shares',
+                    lifecycleCounts,
+                    topTicker,
+                };
+            });
+        }
+
+        function buildOutcomeCounts(closedTrades) {
+            const counts = {};
+            for (const trade of closedTrades) {
+                counts[trade.lifecycle] = (counts[trade.lifecycle] || 0) + 1;
+            }
+            return counts;
+        }
+
+        function topWeeks(weeklyData) {
+            return [...weeklyData]
+                .map((item) => ({
+                    label: item.label,
+                    realized: item.pending ? (item.pendingPremium || 0) : (item.realized || 0),
+                }))
+                .sort((a, b) => b.realized - a.realized)
+                .slice(0, 2);
+        }
+
+        function renderHeroMeta(data, totalRealized, closedTrades) {
+            const marketTime = data.marketDataAt
+                ? new Date(data.marketDataAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })
+                : '无行情快照';
+            const assignedCount = closedTrades.filter((trade) => trade.assigned).length;
+            const cards = [
+                {
+                    label: 'Ledger Updated',
+                    value: data.updatedAt || '—',
+                    sub: `${closedTrades.length} closed trades · ${formatMoney(totalRealized)}`,
+                },
+                {
+                    label: 'Market Snapshot',
+                    value: marketTime,
+                    sub: `${(data.openPositions || []).length} open positions · ${(data.idlePositions || []).length} idle holdings`,
+                },
+                {
+                    label: 'Assignment Events',
+                    value: `${assignedCount}`,
+                    sub: `${closedTrades.filter((trade) => trade.lifecycle === 'call-away').length} Call Away · ${closedTrades.filter((trade) => trade.lifecycle === 'receive-shares').length} Receive Shares`,
+                },
+            ];
+
+            document.getElementById('hero-meta').innerHTML = cards.map((card) => `
+                <div class="meta-card">
+                    <div class="label">${card.label}</div>
+                    <div class="value">${card.value}</div>
+                    <div class="sub">${card.sub}</div>
+                </div>
+            `).join('');
+        }
+
+        function renderStats(totalRealized, closedTrades, symbols, strategies) {
+            const bestSymbol = symbols[0] || null;
+            const ccStrategy = strategies.find((item) => item.type === 'CC');
+            const cspStrategy = strategies.find((item) => item.type === 'CSP');
+            const stats = [
+                {
+                    label: '累计已实现',
+                    value: formatMoney(totalRealized),
+                    sub: `${closedTrades.length} 笔 closed trades`,
+                },
+                {
+                    label: '贡献最高标的',
+                    value: bestSymbol ? bestSymbol.ticker : '—',
+                    sub: bestSymbol ? `${formatMoney(bestSymbol.realized)} · ${formatPct(bestSymbol.contributionPct)}` : '暂无数据',
+                },
+                {
+                    label: 'CC Call Away',
+                    value: ccStrategy ? formatPct(ccStrategy.assignmentRate) : '—',
+                    sub: ccStrategy ? `${ccStrategy.assignmentCount}/${ccStrategy.trades} 笔` : '暂无 CC',
+                },
+                {
+                    label: 'CSP No Assignment',
+                    value: cspStrategy ? formatPct(cspStrategy.protectedRate) : '—',
+                    sub: cspStrategy ? `${cspStrategy.trades - cspStrategy.assignmentCount}/${cspStrategy.trades} 笔` : '暂无 CSP',
+                },
+            ];
+
+            document.getElementById('stats').innerHTML = stats.map((stat) => `
+                <div class="stat-card">
+                    <div class="label">${stat.label}</div>
+                    <div class="value">${stat.value}</div>
+                    <div class="sub">${stat.sub}</div>
+                </div>
+            `).join('');
+        }
+
+        function renderPerformanceSection(weeklyData, monthlyData, totalRealized) {
+            const sortedWeekly = [...weeklyData].sort((a, b) => toWeekNumber(a.week) - toWeekNumber(b.week));
+            const labels = sortedWeekly.map((item) => item.week);
+            const values = sortedWeekly.map((item) => item.pending ? (item.pendingPremium || 0) : (item.realized || 0));
+            let runningTotal = 0;
+            const cumulative = values.map((value) => {
+                runningTotal += value;
+                return runningTotal;
+            });
+
+            new Chart(document.getElementById('performance-chart').getContext('2d'), {
+                data: {
+                    labels,
+                    datasets: [
+                        {
+                            type: 'bar',
+                            label: 'Weekly Realized',
+                            data: values,
+                            backgroundColor: values.map((value) => value >= 0 ? 'rgba(15, 118, 110, 0.72)' : 'rgba(180, 35, 24, 0.75)'),
+                            borderColor: values.map((value) => value >= 0 ? '#0f766e' : '#b42318'),
+                            borderWidth: 1.5,
+                            borderRadius: 8,
+                            yAxisID: 'y',
+                        },
+                        {
+                            type: 'line',
+                            label: 'Cumulative Realized',
+                            data: cumulative,
+                            borderColor: '#1d4ed8',
+                            backgroundColor: 'rgba(29, 78, 216, 0.14)',
+                            borderWidth: 3,
+                            tension: 0.28,
+                            pointRadius: 4,
+                            pointBackgroundColor: '#1d4ed8',
+                            yAxisID: 'y1',
+                        },
+                    ],
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: {
+                        legend: { labels: { color: '#475467' } },
+                        tooltip: {
+                            callbacks: {
+                                label(context) {
+                                    return `${context.dataset.label}: ${formatMoney(context.parsed.y)}`;
+                                },
+                            },
+                        },
+                    },
+                    scales: {
+                        x: {
+                            ticks: { color: '#667085' },
+                            grid: { display: false },
+                        },
+                        y: {
+                            beginAtZero: true,
+                            ticks: { color: '#667085', callback: (value) => formatMoney(value) },
+                            grid: { color: 'rgba(29, 36, 48, 0.08)' },
+                        },
+                        y1: {
+                            beginAtZero: true,
+                            position: 'right',
+                            ticks: { color: '#667085', callback: (value) => formatMoney(value) },
+                            grid: { display: false },
+                        },
+                    },
+                },
+            });
+
+            document.getElementById('monthly-summary').innerHTML = monthlyData.map((month) => `
+                <div class="mini-card">
+                    <div class="label">${month.label}</div>
+                    <div class="value">${formatMoney(month.realized)}</div>
+                    <div class="sub">${month.trades} 笔 · ${formatPct(month.sharePct)}</div>
+                </div>
+            `).join('');
+
+            const bestMonth = [...monthlyData].sort((a, b) => b.realized - a.realized)[0];
+            const bestWeeks = topWeeks(weeklyData);
+            document.getElementById('time-insight').textContent = bestMonth
+                ? `${bestMonth.label} 是当前最强月份，贡献 ${formatPct(bestMonth.sharePct)} 的 realized premium。最高的两个到期周分别是 ${bestWeeks.map((item) => `${item.label} ${formatMoney(item.realized)}`).join('、')}。`
+                : `总 realized premium 为 ${formatMoney(totalRealized)}。`;
+        }
+
+        function renderSymbolSection(symbols, totalRealized) {
+            const topSymbols = symbols.slice(0, 8);
+            new Chart(document.getElementById('symbol-chart').getContext('2d'), {
+                type: 'bar',
+                data: {
+                    labels: topSymbols.map((item) => item.ticker),
+                    datasets: [{
+                        data: topSymbols.map((item) => item.realized),
+                        backgroundColor: topSymbols.map((item) => item.realized >= 0 ? 'rgba(29, 78, 216, 0.75)' : 'rgba(180, 35, 24, 0.75)'),
+                        borderColor: topSymbols.map((item) => item.realized >= 0 ? '#1d4ed8' : '#b42318'),
+                        borderWidth: 1.5,
+                        borderRadius: 10,
+                    }],
+                },
+                options: {
+                    indexAxis: 'y',
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label(context) {
+                                    const symbol = topSymbols[context.dataIndex];
+                                    return `${formatMoney(context.parsed.x)} · ${formatPct(symbol.contributionPct)} · ${symbol.trades} 笔`;
+                                },
+                            },
+                        },
+                    },
+                    scales: {
+                        x: {
+                            ticks: { color: '#667085', callback: (value) => formatMoney(value) },
+                            grid: { color: 'rgba(29, 36, 48, 0.08)' },
+                        },
+                        y: {
+                            ticks: { color: '#475467' },
+                            grid: { display: false },
+                        },
+                    },
+                },
+            });
+
+            const highlights = [
+                symbols[0] ? {
+                    label: 'Top Contributor',
+                    value: symbols[0].ticker,
+                    sub: `${formatMoney(symbols[0].realized)} · ${formatPct(symbols[0].contributionPct)}`,
+                } : null,
+                symbols[0] ? {
+                    label: 'Top 3 合计',
+                    value: formatPct(symbols.slice(0, 3).reduce((sum, item) => sum + item.contributionPct, 0)),
+                    sub: `${formatMoney(symbols.slice(0, 3).reduce((sum, item) => sum + item.realized, 0))}`,
+                } : null,
+                symbols.length ? {
+                    label: 'Active Underlyings',
+                    value: `${symbols.length}`,
+                    sub: `${formatMoney(totalRealized)} total realized`,
+                } : null,
+                symbols.length ? {
+                    label: 'Highest Win-Like',
+                    value: [...symbols].sort((a, b) => b.winLikeRate - a.winLikeRate)[0].ticker,
+                    sub: formatPct([...symbols].sort((a, b) => b.winLikeRate - a.winLikeRate)[0].winLikeRate),
+                } : null,
+            ].filter(Boolean);
+
+            document.getElementById('symbol-highlights').innerHTML = highlights.map((item) => `
+                <div class="metric">
+                    <div class="label">${item.label}</div>
+                    <div class="value">${item.value}</div>
+                    <div class="sub muted">${item.sub}</div>
+                </div>
+            `).join('');
+
+            const topSymbol = symbols[0];
+            document.getElementById('symbol-insight').textContent = topSymbol
+                ? `${topSymbol.ticker} 目前是最主要的 realized premium 引擎，累计 ${formatMoney(topSymbol.realized)}，贡献 ${formatPct(topSymbol.contributionPct)}。如果你要找“哪些判断在拉动收益”，先看头部标的，再看它们的 lifecycle mix。`
+                : '暂无标的聚合数据。';
+
+            document.getElementById('symbol-table').innerHTML = symbols.map((symbol) => {
+                const context = [];
+                if (symbol.holding) {
+                    const unrealized = Number.isFinite(symbol.holding.unrealizedDollar)
+                        ? `${formatMoney(symbol.holding.unrealizedDollar)} / ${formatPct(symbol.holding.unrealizedPct)}`
+                        : '无最新价格';
+                    context.push(`${symbol.holding.shares} 股在手 · ${unrealized}`);
+                }
+                if (symbol.openPositions.length > 0) {
+                    context.push(`${symbol.openPositions.length} 张 open position`);
+                }
+
+                return `
+                    <tr>
+                        <td>
+                            <div class="ticker">${symbol.ticker}</div>
+                            <div class="muted">${symbol.ccTrades} CC · ${symbol.cspTrades} CSP · ${symbol.weekCount} 周</div>
+                        </td>
+                        <td class="nowrap ${symbol.realized >= 0 ? 'positive' : 'negative'}">${formatMoney(symbol.realized)}</td>
+                        <td class="nowrap">${formatPct(symbol.contributionPct)}</td>
+                        <td>${symbol.trades}</td>
+                        <td class="nowrap">${formatMoney(symbol.avgPremium)}</td>
+                        <td class="nowrap">${formatPct(symbol.winLikeRate)}</td>
+                        <td class="nowrap">${formatPct(symbol.assignmentRate)}</td>
+                        <td><div class="pill-row">${lifecyclePills(symbol.lifecycleCounts)}</div></td>
+                        <td class="muted">${context.length ? context.join(' · ') : '当前无持仓关联'}</td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        function renderStrategySection(strategies, outcomeCounts) {
+            document.getElementById('strategy-cards').innerHTML = strategies.map((strategy) => `
+                <div class="panel strategy-card">
+                    <div class="strategy-title">
+                        <div>
+                            <div class="kicker">Strategy</div>
+                            <h3>${strategy.type}</h3>
+                        </div>
+                        <div class="sub">${strategy.trades} trades · ${formatMoney(strategy.realized)}</div>
+                    </div>
+                    <div class="metric-row">
+                        <div class="metric">
+                            <div class="label">Avg / Trade</div>
+                            <div class="value">${formatMoney(strategy.avgPremium)}</div>
+                        </div>
+                        <div class="metric">
+                            <div class="label">Win-Like</div>
+                            <div class="value">${formatPct(strategy.winLikeRate)}</div>
+                        </div>
+                        <div class="metric">
+                            <div class="label">${strategy.assignmentLabel}</div>
+                            <div class="value">${formatPct(strategy.assignmentRate)}</div>
+                        </div>
+                        <div class="metric">
+                            <div class="label">${strategy.protectedLabel}</div>
+                            <div class="value">${formatPct(strategy.protectedRate)}</div>
+                        </div>
+                    </div>
+                    <div class="legend" style="margin-top: 18px;">${lifecyclePills(strategy.lifecycleCounts)}</div>
+                    <div class="footnote">Top ticker: ${strategy.topTicker ? `${strategy.topTicker[0]} ${formatMoney(strategy.topTicker[1])}` : '—'}</div>
+                </div>
+            `).join('');
+
+            const labels = lifecycleOrder.filter((key) => outcomeCounts[key]);
+            const values = labels.map((key) => outcomeCounts[key]);
+            new Chart(document.getElementById('outcome-chart').getContext('2d'), {
+                type: 'doughnut',
+                data: {
+                    labels: labels.map((key) => lifecycleText[key]),
+                    datasets: [{
+                        data: values,
+                        backgroundColor: labels.map((key) => lifecycleColors[key]),
+                        borderWidth: 0,
+                        hoverOffset: 6,
+                    }],
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label(context) {
+                                    const total = values.reduce((sum, value) => sum + value, 0) || 1;
+                                    const pct = (context.parsed / total) * 100;
+                                    return `${context.label}: ${context.parsed} 笔 · ${formatPct(pct)}`;
+                                },
+                            },
+                        },
+                    },
+                    cutout: '62%',
+                },
+            });
+
+            document.getElementById('outcome-legend').innerHTML = labels.map((key) => `
+                <span class="pill pill-${lifecycleTone[key]}">${lifecycleText[key]} ${outcomeCounts[key]}</span>
+            `).join('');
+        }
+
+        function renderSnapshotSection(data) {
+            const openRows = (data.openPositions || []).map((position) => {
+                const buffer = Number.isFinite(position.bufferPct)
+                    ? `${position.bufferPct >= 0 ? '+' : ''}${position.bufferPct.toFixed(1)}% ${position.bufferPct >= 0 ? 'OTM' : 'ITM'}`
+                    : '—';
+                return `
+                    <tr>
+                        <td class="ticker">${position.ticker}</td>
+                        <td>${position.type}</td>
+                        <td class="nowrap">${formatMoney(position.strike, 2)}</td>
+                        <td>${position.expiry}</td>
+                        <td class="nowrap">${formatMoney(position.premium, 0)}</td>
+                        <td class="nowrap">${Number.isFinite(position.lastPrice) ? formatMoney(position.lastPrice, 2) : '—'}</td>
+                        <td class="nowrap">${buffer}</td>
+                    </tr>
+                `;
+            }).join('') || '<tr><td colspan="7" class="muted">暂无在途期权持仓。</td></tr>';
+
+            const idleRows = (data.idlePositions || []).map((position) => {
+                const unrealized = Number.isFinite(position.unrealizedDollar)
+                    ? `${formatMoney(position.unrealizedDollar)} / ${formatPct(position.unrealizedPct)}`
+                    : '—';
+                return `
+                    <tr>
+                        <td class="ticker">${position.ticker}</td>
+                        <td>${position.shares}</td>
+                        <td class="nowrap">${formatMoney(position.costBasis, 2)}</td>
+                        <td class="nowrap">${Number.isFinite(position.lastPrice) ? formatMoney(position.lastPrice, 2) : '—'}</td>
+                        <td class="nowrap ${Number.isFinite(position.unrealizedDollar) && position.unrealizedDollar < 0 ? 'negative' : 'positive'}">${unrealized}</td>
+                        <td class="muted">${escapeHtml(position.note || '')}</td>
+                    </tr>
+                `;
+            }).join('') || '<tr><td colspan="6" class="muted">暂无持仓股票。</td></tr>';
+
+            document.getElementById('open-table').innerHTML = openRows;
+            document.getElementById('idle-table').innerHTML = idleRows;
+        }
+
+        function render() {
+            const closedTrades = DATA.closedTrades || [];
+            const weeklyData = DATA.weeklyData || [];
+            const totalRealized = closedTrades.reduce((sum, trade) => sum + (trade.premium || 0), 0);
+            const monthlyData = buildMonthlySummary(weeklyData, totalRealized);
+            const symbols = buildSymbolAnalytics(DATA);
+            const strategies = buildStrategyAnalytics(closedTrades);
+            const outcomeCounts = buildOutcomeCounts(closedTrades);
+
+            renderHeroMeta(DATA, totalRealized, closedTrades);
+            renderStats(totalRealized, closedTrades, symbols, strategies);
+            renderPerformanceSection(weeklyData, monthlyData, totalRealized);
+            renderSymbolSection(symbols, totalRealized);
+            renderStrategySection(strategies, outcomeCounts);
+            renderSnapshotSection(DATA);
+        }
+
+        render();
+    </script>
+</body>
+</html>

@@ -41,9 +41,19 @@ export THETA_DATA_DIR="../theta-data"
 node src/build.js
 ```
 
+如果只想做本地深度分析页，不需要密码：
+
+```bash
+cd /Users/kyx/Documents/theta-dashboard
+export THETA_DATA_DIR="../theta-data"
+node src/build-local.js
+```
+
 便捷命令：
 
 - `./build.sh` 只生成 `index.html`
+- `./build.sh --local` 只生成本地分析页 `local-analytics.html`
+- `./build.sh --all` 同时生成 `index.html` 和 `local-analytics.html`
 - `./build.sh --push` 生成后提交并推送 `index.html`
 
 ---
@@ -63,10 +73,14 @@ node src/build.js
 | 文件 | 说明 |
 | --- | --- |
 | `src/build.js` | 读取上游 JSON、校验、补充市场数据、加密并生成页面 |
+| `src/build-local.js` | 读取上游 JSON、校验并生成本地分析页，不加密 |
 | `src/validate.js` | 在加密前校验上游 `portfolio_data.json` |
+| `src/data-loader.js` | 共享数据入口，负责定位上游 JSON 并补充市场数据 |
 | `src/encrypt.js` | AES-256-GCM 加密模块 |
 | `template.html` | 页面模板 |
+| `local-template.html` | 本地分析页模板 |
 | `index.html` | 构建产物，提交到 GitHub Pages |
+| `local-analytics.html` | 本地分析产物，仅供本机打开，默认忽略不提交 |
 | `build.sh` | 本地构建和可选推送脚本 |
 
 ---
@@ -75,7 +89,9 @@ node src/build.js
 
 - `portfolio_data.json` 和 `market_data.json` 可以临时放在仓库根目录做本地覆盖
 - 这两个文件默认都被 `.gitignore` 排除，不应提交
+- `local-analytics.html` 也是本地专用产物，默认忽略不提交
 - `market_data.json` 用于补齐 `openPositions` 的 `lastPrice`、`bufferDollar` 和 `bufferPct`
+- 同时也会补齐 `idlePositions` 的 `lastPrice`、`marketValue` 和 `unrealized` 数据，供本地分析页使用
 
 Buffer 计算：
 
