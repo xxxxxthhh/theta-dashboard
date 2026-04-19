@@ -92,10 +92,16 @@
         .trade-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 16px; font-size: 13px; border-radius: 6px; }
         .trade-row:hover { background: #12171f; }
         .trade-left { display: flex; flex-direction: column; gap: 2px; }
-        .trade-ticker { font-weight: 700; }
+        .trade-ticker { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; font-weight: 700; }
         .trade-detail { font-size: 11px; color: #6e7681; }
         .trade-premium { font-weight: 700; }
-        .trade-assigned { font-size: 10px; background: rgba(217,130,43,0.15); color: #d29922; padding: 1px 5px; border-radius: 4px; margin-left: 6px; }
+        .trade-status { font-size: 10px; padding: 1px 6px; border-radius: 999px; font-weight: 700; }
+        .trade-status-positive { background: rgba(63,185,80,0.14); color: #3fb950; }
+        .trade-status-warning { background: rgba(217,130,43,0.15); color: #d29922; }
+        .trade-status-accent { background: rgba(88,166,255,0.16); color: #58a6ff; }
+        .trade-status-gold { background: rgba(188,140,255,0.15); color: #bc8cff; }
+        .trade-status-danger { background: rgba(248,81,73,0.15); color: #f85149; }
+        .trade-status-muted { background: rgba(110,118,129,0.18); color: #c9d1d9; }
     </style>
 </head>
 <body>
@@ -179,6 +185,37 @@
         function b64(s) { return Uint8Array.from(atob(s), c => c.charCodeAt(0)); }
 
         document.getElementById('pwd').addEventListener('keypress', e => { if (e.key === 'Enter') unlock(); });
+
+        function deriveFallbackLifecycle(trade) {
+            const result = trade.result || '';
+            if (/归零/.test(result)) return { label: 'Expire Worthless', tone: 'positive' };
+            if (/止盈/.test(result)) return { label: 'Take Profit', tone: 'gold' };
+            if (/止损|净亏损|被动平仓/.test(result)) return { label: 'Stop Loss', tone: 'danger' };
+            if (/到期/.test(result)) return { label: 'Expired', tone: 'muted' };
+            if (trade.assigned) {
+                return trade.type === 'CC'
+                    ? { label: 'Call Away', tone: 'warning' }
+                    : { label: 'Receive Shares', tone: 'accent' };
+            }
+            return null;
+        }
+
+        function getLifecycleBadge(trade) {
+            const lifecycle = trade.lifecycle || '';
+            const label = trade.lifecycleLabel || (deriveFallbackLifecycle(trade) || {}).label;
+            if (!label) return '';
+
+            let tone = 'muted';
+            if (lifecycle === 'expire-worthless') tone = 'positive';
+            else if (lifecycle === 'call-away') tone = 'warning';
+            else if (lifecycle === 'receive-shares') tone = 'accent';
+            else if (lifecycle === 'take-profit') tone = 'gold';
+            else if (lifecycle === 'stop-loss') tone = 'danger';
+            else if (lifecycle === 'expired' || lifecycle === 'pending') tone = 'muted';
+            else tone = (deriveFallbackLifecycle(trade) || {}).tone || 'muted';
+
+            return `<span class="trade-status trade-status-${tone}">${label}</span>`;
+        }
 
         // ── Render ────────────────────────────────────────────────────────────
 
@@ -408,11 +445,11 @@
                             ${trades.map(t => {
                                 const sign = t.premium >= 0 ? '+' : '';
                                 const color = t.premium < 0 ? '#f85149' : '#3fb950';
-                                const assignBadge = t.assigned ? '<span class="trade-assigned">接货</span>' : '';
+                                const lifecycleBadge = getLifecycleBadge(t);
                                 return `
                                     <div class="trade-row">
                                         <div class="trade-left">
-                                            <span class="trade-ticker">${t.ticker} <span style="color:#6e7681;font-weight:400;">${t.type} $${t.strike}</span>${assignBadge}</span>
+                                            <span class="trade-ticker">${t.ticker} <span style="color:#6e7681;font-weight:400;">${t.type} $${t.strike}</span>${lifecycleBadge}</span>
                                             <span class="trade-detail">${t.result || ''}</span>
                                         </div>
                                         <span class="trade-premium" style="color:${color}">${sign}$${Math.abs(t.premium)}</span>
