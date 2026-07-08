@@ -63,6 +63,11 @@
         .buffer-bar { flex: 1; max-width: 100px; height: 3px; background: #1e2733; border-radius: 2px; overflow: hidden; }
         .buffer-bar-fill { height: 100%; border-radius: 2px; }
         .market-data-ts { font-size: 10px; color: #484f58; text-align: right; margin-bottom: 8px; }
+        .expiry-group { margin-bottom: 16px; }
+        .expiry-group-header { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 14px; margin-bottom: 10px; background: #0d1117; border: 1px solid #1e2733; border-radius: 8px; color: #c9d1d9; }
+        .expiry-group-title { font-size: 13px; font-weight: 700; color: #58a6ff; }
+        .expiry-group-meta { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 8px; font-size: 12px; color: #6e7681; }
+        .expiry-group-meta strong { color: #d29922; font-weight: 700; }
 
         /* Idle positions table */
         .idle-table { width: 100%; border-collapse: collapse; font-size: 13px; }
@@ -102,6 +107,18 @@
         .trade-status-gold { background: rgba(188,140,255,0.15); color: #bc8cff; }
         .trade-status-danger { background: rgba(248,81,73,0.15); color: #f85149; }
         .trade-status-muted { background: rgba(110,118,129,0.18); color: #c9d1d9; }
+
+        @media (max-width: 480px) {
+            body { padding: 14px; }
+            .stats { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
+            .stat-card { padding: 14px; }
+            .stat-card .value { font-size: 19px; }
+            .pos-header,
+            .expiry-group-header { align-items: flex-start; flex-direction: column; }
+            .pos-meta,
+            .pos-price-row { flex-wrap: wrap; gap: 8px 12px; }
+            .expiry-group-meta { justify-content: flex-start; }
+        }
     </style>
 </head>
 <body>
@@ -217,6 +234,25 @@
             return `<span class="trade-status trade-status-${tone}">${label}</span>`;
         }
 
+        function getContractCount(position) {
+            return Number.isFinite(position.contracts) && position.contracts > 0 ? position.contracts : 1;
+        }
+
+        function getCspNotional(position) {
+            if (position.type !== 'CSP' || !Number.isFinite(position.strike)) return 0;
+            return position.strike * 100 * getContractCount(position);
+        }
+
+        function formatDollar(value) {
+            return '$' + Math.round(value).toLocaleString();
+        }
+
+        function formatExpiryMd(expiry) {
+            const parts = String(expiry || '').split('-');
+            if (parts.length !== 3) return expiry || '日期异常';
+            return `${Number(parts[1])}/${Number(parts[2])}`;
+        }
+
         // ── Render ────────────────────────────────────────────────────────────
 
         function renderDashboard(data) {
@@ -235,6 +271,18 @@
             const pendingPremium = open.reduce((s, p) => s + (p.premium || 0), 0);
             const ccCount = open.filter(p => p.type === 'CC').length;
             const cspCount = open.filter(p => p.type === 'CSP').length;
+            const cspNotionalByTicker = {};
+            for (const p of open) {
+                const notional = getCspNotional(p);
+                if (!notional) continue;
+                cspNotionalByTicker[p.ticker] = (cspNotionalByTicker[p.ticker] || 0) + notional;
+            }
+            const cspNotional = Object.values(cspNotionalByTicker).reduce((s, value) => s + value, 0);
+            const topCspNotional = Object.entries(cspNotionalByTicker)
+                .sort((a, b) => b[1] - a[1])[0];
+            const topCspSub = topCspNotional
+                ? `最大单标的 ${topCspNotional[0]} ${Math.round(topCspNotional[1] / cspNotional * 100)}%`
+                : '暂无 CSP 敞口';
 
             // Stats
             document.getElementById('stats').innerHTML = `
@@ -253,6 +301,11 @@
                     <div class="value cyan">${open.length}</div>
                     <div class="sub">${ccCount} CC · ${cspCount} CSP</div>
                 </div>
+                <div class="stat-card">
+                    <div class="label">CSP 名义敞口</div>
+                    <div class="value yellow">${formatDollar(cspNotional)}</div>
+                    <div class="sub">${topCspSub}</div>
+                </div>
             `;
 
             // Open positions
@@ -267,7 +320,7 @@
                              + ' ' + d.toLocaleTimeString('zh-CN', { timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit' });
                     openEl.insertAdjacentHTML('beforebegin', `<div class="market-data-ts">收盘价更新于 ${ts}</div>`);
                 }
-                openEl.innerHTML = open.map(p => {
+                const renderPositionCard = (p) => {
                     const today = new Date();
                     today.setHours(0, 0, 0, 0);
                     const expDate = new Date(p.expiry + 'T23:59:59');
@@ -292,6 +345,10 @@
                             </div>`;
                     }
 
+                    const cspNotionalHtml = p.type === 'CSP'
+                        ? `<span>占用 ${formatDollar(getCspNotional(p))}</span>`
+                        : '';
+
                     return `
                         <div class="pos-card ${p.type}">
                             <div class="pos-header">
@@ -306,11 +363,44 @@
                                 <span>到期 ${p.expiry}</span>
                                 <span class="${dteClass}">${dteLabel}</span>
                                 ${p.contracts ? `<span>${p.contracts} 张</span>` : ''}
+                                ${cspNotionalHtml}
                             </div>
                             ${bufferHtml}
                         </div>
                     `;
-                }).join('');
+                };
+
+                const byExpiry = {};
+                for (const position of open) {
+                    const expiry = position.expiry || '日期异常';
+                    if (!byExpiry[expiry]) byExpiry[expiry] = [];
+                    byExpiry[expiry].push(position);
+                }
+
+                openEl.innerHTML = Object.entries(byExpiry)
+                    .sort(([a], [b]) => a.localeCompare(b))
+                    .map(([expiry, positions]) => {
+                        const contracts = positions.reduce((s, p) => s + getContractCount(p), 0);
+                        const groupPremium = positions.reduce((s, p) => s + (p.premium || 0), 0);
+                        const groupCspNotional = positions.reduce((s, p) => s + getCspNotional(p), 0);
+                        const exposureHtml = groupCspNotional > 0
+                            ? `<span><strong>CSP 敞口 ${formatDollar(groupCspNotional)}</strong></span>`
+                            : '';
+
+                        return `
+                            <div class="expiry-group">
+                                <div class="expiry-group-header">
+                                    <span class="expiry-group-title">${formatExpiryMd(expiry)} 到期</span>
+                                    <span class="expiry-group-meta">
+                                        <span>${contracts} 张</span>
+                                        <span>权利金 ${formatDollar(groupPremium)}</span>
+                                        ${exposureHtml}
+                                    </span>
+                                </div>
+                                ${positions.map(renderPositionCard).join('')}
+                            </div>
+                        `;
+                    }).join('');
             }
 
             // Idle positions
