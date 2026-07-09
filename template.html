@@ -69,6 +69,22 @@
         .expiry-group-meta { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 8px; font-size: 12px; color: #6e7681; }
         .expiry-group-meta strong { color: #d29922; font-weight: 700; }
 
+        /* Attention strip */
+        .attention-strip { display: flex; flex-direction: column; gap: 8px; margin-bottom: 24px; }
+        .attention-row { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 8px; font-size: 13px; border: 1px solid; }
+        .attention-row .att-icon { font-size: 13px; flex-shrink: 0; }
+        .attention-row strong { font-weight: 700; }
+        .attention-danger { background: rgba(248,81,73,0.12); border-color: rgba(248,81,73,0.4); color: #f85149; }
+        .attention-warn { background: rgba(210,153,34,0.12); border-color: rgba(210,153,34,0.4); color: #d29922; }
+        .attention-nodata { background: rgba(110,118,129,0.12); border-color: rgba(110,118,129,0.45); color: #8b949e; }
+        .attention-ok { background: rgba(63,185,80,0.10); border-color: rgba(63,185,80,0.35); color: #3fb950; }
+
+        /* Annualized yield + CC cost-line flags */
+        .pos-annual { color: #58a6ff; }
+        .cc-flag { font-size: 10px; padding: 2px 7px; border-radius: 99px; font-weight: 700; margin-left: 6px; }
+        .cc-flag-repair { background: rgba(210,153,34,0.15); color: #d29922; }
+        .cc-flag-t3 { background: rgba(248,81,73,0.15); color: #f85149; }
+
         /* Idle positions table */
         .idle-table { width: 100%; border-collapse: collapse; font-size: 13px; }
         .idle-table th { text-align: left; color: #6e7681; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; padding: 6px 12px; border-bottom: 1px solid #1e2733; }
@@ -77,6 +93,9 @@
         .idle-table .ticker-cell { font-weight: 700; color: #c9d1d9; }
         .cc-yes { color: #3fb950; font-size: 12px; }
         .cc-no { color: #6e7681; font-size: 12px; }
+        .idle-table-wrap { overflow-x: auto; }
+        .pnl-pos { color: #3fb950; }
+        .pnl-neg { color: #f85149; }
 
         /* Chart */
         .chart-wrap { background: #12171f; border: 1px solid #1e2733; border-radius: 12px; padding: 20px; }
@@ -118,6 +137,7 @@
             .pos-meta,
             .pos-price-row { flex-wrap: wrap; gap: 8px 12px; }
             .expiry-group-meta { justify-content: flex-start; }
+            .attention-row { align-items: flex-start; }
         }
     </style>
 </head>
@@ -138,6 +158,9 @@
 
             <!-- Stats -->
             <div class="stats" id="stats"></div>
+
+            <!-- Attention strip -->
+            <div id="attention-strip"></div>
 
             <!-- Open Positions -->
             <div class="section">
@@ -253,6 +276,75 @@
             return `${Number(parts[1])}/${Number(parts[2])}`;
         }
 
+        // 用字符串日期（YYYY-MM-DD）按 UTC 零点算日历日差，避免本地时区偏移；下限 1 天
+        function daysBetween(startYmd, endYmd) {
+            const s = Date.parse(startYmd + 'T00:00:00Z');
+            const e = Date.parse(endYmd + 'T00:00:00Z');
+            if (Number.isNaN(s) || Number.isNaN(e)) return null;
+            return Math.max(1, Math.round((e - s) / 86400000));
+        }
+
+        // 年化 = 权利金 / 占用资本 / 原始期限 × 365。用开仓日→到期日的原始期限，
+        // 不用剩余 DTE（否则临期会虚高）。openDate 缺失则返回 null（不显示，不猜）。
+        function getAnnualizedYieldPct(p, costBasisByTicker) {
+            if (!p.openDate || !p.expiry) return null;
+            const term = daysBetween(p.openDate, p.expiry);
+            if (term == null) return null;
+            let capital;
+            if (p.type === 'CSP') {
+                capital = p.strike * 100 * getContractCount(p);
+            } else {
+                const cost = costBasisByTicker[p.ticker];
+                capital = (typeof cost === 'number' && cost > 0 ? cost : p.strike) * 100 * getContractCount(p);
+            }
+            if (!(capital > 0) || !(p.premium > 0)) return null;
+            return (p.premium / capital) / term * 365 * 100;
+        }
+
+        // 履约风险告警条：把 buffer 从被动小字提升为主动分档提示。
+        // 三态必须齐全——「无数据」和危险态同等重要，刚开的仓最容易落在无数据。
+        function renderAttentionStrip(open) {
+            const el = document.getElementById('attention-strip');
+            if (!open || open.length === 0) { el.className = ''; el.innerHTML = ''; return; }
+
+            const danger = [];
+            const warn = [];
+            const noData = [];
+            for (const p of open) {
+                const priced = typeof p.lastPrice === 'number' && typeof p.bufferPct === 'number';
+                if (!priced) { noData.push(p); continue; }
+                // CC ITM 不进告警条：被 call away 是策略接受的结局，不是风险事件
+                if (p.type !== 'CSP') continue;
+                if (p.bufferPct < 0) {
+                    danger.push({ p, deep: (p.strike - p.lastPrice) > 5 });
+                } else if (p.bufferPct < 5) {
+                    warn.push(p);
+                }
+            }
+
+            const rows = [];
+            for (const { p, deep } of danger) {
+                const depthNote = deep
+                    ? ` · <strong>深度 ITM $${(p.strike - p.lastPrice).toFixed(1)} · §11 立即重估</strong>`
+                    : '';
+                rows.push(`<div class="attention-row attention-danger"><span class="att-icon">⚠</span><span>${p.ticker} $${p.strike} CSP 已 ITM ${p.bufferPct.toFixed(1)}%${depthNote}</span></div>`);
+            }
+            if (warn.length) {
+                const list = warn.map(p => `${p.ticker} +${p.bufferPct.toFixed(1)}%`).join('、');
+                rows.push(`<div class="attention-row attention-warn"><span class="att-icon">◔</span><span>buffer 不足 5%：${list}</span></div>`);
+            }
+            if (noData.length) {
+                const list = noData.map(p => p.ticker).join('、');
+                rows.push(`<div class="attention-row attention-nodata"><span class="att-icon">○</span><span>${noData.length} 张持仓无价格数据（${list}）</span></div>`);
+            }
+            if (rows.length === 0) {
+                rows.push(`<div class="attention-row attention-ok"><span class="att-icon">✓</span><span>全部在途 CSP buffer ≥ 5%，价格齐全</span></div>`);
+            }
+
+            el.className = 'attention-strip';
+            el.innerHTML = rows.join('');
+        }
+
         // ── Render ────────────────────────────────────────────────────────────
 
         function renderDashboard(data) {
@@ -308,6 +400,16 @@
                 </div>
             `;
 
+            // Attention strip（履约风险分档）
+            renderAttentionStrip(open);
+
+            // CC 成本线锚：按 ticker 弱关联到持仓股票的接货成本。
+            // 这是按 ticker 的弱关联，不是数据契约——股票不在 idle 表则无锚，跳过标记。
+            const costBasisByTicker = {};
+            for (const p of idle) {
+                if (typeof p.costBasis === 'number') costBasisByTicker[p.ticker] = p.costBasis;
+            }
+
             // Open positions
             const openEl = document.getElementById('open-positions');
             if (open.length === 0) {
@@ -349,6 +451,26 @@
                         ? `<span>占用 ${formatDollar(getCspNotional(p))}</span>`
                         : '';
 
+                    // 年化收益率（原始期限口径）
+                    const annual = getAnnualizedYieldPct(p, costBasisByTicker);
+                    const annualHtml = annual != null
+                        ? `<span class="pos-annual">年化 ${Math.round(annual)}%</span>`
+                        : '';
+
+                    // CC 成本线标记（Wheel-v1 §10）：修复 / T3 深度告警
+                    let ccFlagHtml = '';
+                    if (p.type === 'CC') {
+                        const cost = costBasisByTicker[p.ticker];
+                        if (typeof cost === 'number' && cost > 0) {
+                            if (p.strike < cost * 0.80) {
+                                const locked = (cost - p.strike) * 100 * getContractCount(p);
+                                ccFlagHtml = `<span class="cc-flag cc-flag-t3">T3 · 锁亏 ${formatDollar(locked)}</span>`;
+                            } else if (p.strike < cost) {
+                                ccFlagHtml = `<span class="cc-flag cc-flag-repair">修复</span>`;
+                            }
+                        }
+                    }
+
                     return `
                         <div class="pos-card ${p.type}">
                             <div class="pos-header">
@@ -356,6 +478,7 @@
                                     <span class="pos-ticker">${p.ticker}</span>
                                     <span class="pos-badge ${p.type}">${p.type}</span>
                                     <span style="font-size:14px; color:#6e7681; margin-left:6px;">$${p.strike}</span>
+                                    ${ccFlagHtml}
                                 </div>
                                 <span class="pos-premium">${p.premium > 0 ? '+$' + p.premium : '—'}</span>
                             </div>
@@ -364,6 +487,7 @@
                                 <span class="${dteClass}">${dteLabel}</span>
                                 ${p.contracts ? `<span>${p.contracts} 张</span>` : ''}
                                 ${cspNotionalHtml}
+                                ${annualHtml}
                             </div>
                             ${bufferHtml}
                         </div>
@@ -410,30 +534,45 @@
                 idleSection.style.display = 'none';
             } else {
                 idleEl.innerHTML = `
+                    <div class="idle-table-wrap">
                     <table class="idle-table">
                         <thead>
                             <tr>
                                 <th>标的</th>
                                 <th>股数</th>
                                 <th>成本均价</th>
+                                <th>现价</th>
                                 <th>市值成本</th>
+                                <th>浮盈</th>
                                 <th>可卖 CC</th>
                                 <th>备注</th>
                             </tr>
                         </thead>
                         <tbody>
-                            ${idle.map(p => `
+                            ${idle.map(p => {
+                                const priceCell = typeof p.lastPrice === 'number' ? `$${p.lastPrice.toFixed(2)}` : '—';
+                                let pnlCell = '—';
+                                if (typeof p.unrealizedDollar === 'number' && typeof p.unrealizedPct === 'number') {
+                                    const cls = p.unrealizedDollar >= 0 ? 'pnl-pos' : 'pnl-neg';
+                                    const sign = p.unrealizedDollar >= 0 ? '+' : '';
+                                    pnlCell = `<span class="${cls}">${sign}$${Math.round(p.unrealizedDollar).toLocaleString()} (${sign}${p.unrealizedPct.toFixed(1)}%)</span>`;
+                                }
+                                return `
                                 <tr>
                                     <td class="ticker-cell">${p.ticker}</td>
                                     <td>${p.shares}</td>
                                     <td>$${p.costBasis.toFixed(2)}</td>
+                                    <td>${priceCell}</td>
                                     <td>$${(p.shares * p.costBasis).toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
+                                    <td>${pnlCell}</td>
                                     <td>${p.canSellCC ? '<span class="cc-yes">✓ 可卖</span>' : '<span class="cc-no">–</span>'}</td>
                                     <td style="color:#6e7681; font-size:12px;">${p.note || ''}</td>
                                 </tr>
-                            `).join('')}
+                                `;
+                            }).join('')}
                         </tbody>
                     </table>
+                    </div>
                 `;
             }
 
