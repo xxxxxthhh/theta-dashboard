@@ -92,6 +92,7 @@
         .cc-flag { font-size: 10px; padding: 2px 7px; border-radius: 99px; font-weight: 700; margin-left: 6px; }
         .cc-flag-repair { background: rgba(210,153,34,0.15); color: #d29922; }
         .cc-flag-t3 { background: rgba(248,81,73,0.15); color: #f85149; }
+        .earnings-straddle { font-size: 10px; padding: 2px 7px; border-radius: 99px; font-weight: 700; background: rgba(210,153,34,0.15); color: #d29922; white-space: nowrap; }
 
         /* Idle positions table */
         .idle-table { width: 100%; border-collapse: collapse; font-size: 13px; }
@@ -205,6 +206,13 @@
                 <h2>波动率体检</h2>
                 <div class="vol-note">RV=已实现波动(标的历史,后视)；IV 底=隐含波动阈值。IV 通常高于 RV，RV 低于门槛只提示复核、非自动降档。</div>
                 <div id="volcheck-body"></div>
+            </div>
+
+            <!-- 财报日程（下次财报 + 在途横跨提示） -->
+            <div class="section" id="earnings-section">
+                <h2>财报日程</h2>
+                <div class="vol-note">财报日为 yfinance best-effort（可能未确认预估、会变动）。横跨=短仓持有至财报：IV crush 利于卖方、但跳空方向是风险，见 Wheel §12。</div>
+                <div id="earnings-body"></div>
             </div>
 
             <!-- Weekly Income Chart -->
@@ -485,6 +493,57 @@
             `;
         }
 
+        // 财报日程：每个持仓 ticker 的下次财报日（yfinance best-effort）。影响列标出「在途期权横跨财报」
+        // （asOf <= 财报日 <= 到期）——短仓持有至财报的风险（Wheel §12）。idle 股票只列日程、不算横跨。
+        // earnings 缺失/空 → 整段隐藏（degrade，可先于上游 Part A 上线不报错）。
+        function renderEarnings(open, earnings, asOf) {
+            const section = document.getElementById('earnings-section');
+            const body = document.getElementById('earnings-body');
+            const entries = earnings && typeof earnings === 'object' ? Object.entries(earnings) : [];
+            if (entries.length === 0) { section.style.display = 'none'; return; }
+            section.style.display = '';
+
+            // 该 ticker 的在途期权仓里，财报落在剩余存续期内（asOf <= ed <= expiry）的张数
+            const straddleCount = (ticker, ed) => {
+                if (typeof asOf !== 'string') return 0;
+                return (open || []).filter(p => p.ticker === ticker && p.expiry && asOf <= ed && ed <= p.expiry).length;
+            };
+
+            const rows = entries
+                .sort((a, b) => a[1].localeCompare(b[1]))   // 按财报日升序
+                .map(([ticker, ed]) => {
+                    const dte = typeof asOf === 'string' ? daysBetween(asOf, ed) : null;
+                    const n = straddleCount(ticker, ed);
+                    const impact = n > 0
+                        ? `<span class="earnings-straddle">⚠ 在途 ${n} 张横跨</span>`
+                        : '—';
+                    return `
+                        <tr>
+                            <td class="ticker-cell">${ticker}</td>
+                            <td>${formatExpiryMd(ed)}</td>
+                            <td>${dte != null ? dte + ' 天' : '—'}</td>
+                            <td>${impact}</td>
+                        </tr>
+                    `;
+                });
+
+            body.innerHTML = `
+                <div class="idle-table-wrap">
+                <table class="idle-table">
+                    <thead>
+                        <tr>
+                            <th>标的</th>
+                            <th>下次财报</th>
+                            <th>距今</th>
+                            <th>影响</th>
+                        </tr>
+                    </thead>
+                    <tbody>${rows.join('')}</tbody>
+                </table>
+                </div>
+            `;
+        }
+
         // 到期预结算：依 fetch job 的 ET 收盘日 priceLatestDate，对临期在途仓做 ITM/OTM 大概率预判。
         // 这是 weekly-close 的草稿、不是最终结算——临界(pin)与盘后波动可能翻转，OTM 一线之隔仍可能被 assign；
         // 判定用严格不等号（close==strike 归 pin，不硬判一边）。台账仍是唯一 source of truth，此处只呈现、绝不改台账。
@@ -740,6 +799,14 @@
                         }
                     }
 
+                    // 横跨财报告警（Wheel-v1 §12）：财报落在这张期权剩余存续期内（asOf <= 财报日 <= 到期）
+                    // = 短仓持有至财报（IV crush 利于卖方、但跳空方向是风险）。不横跨则不标，避免噪音。
+                    let earningsHtml = '';
+                    const posEd = data.earnings && data.earnings[p.ticker];
+                    if (posEd && typeof data.priceLatestDate === 'string' && data.priceLatestDate <= posEd && posEd <= p.expiry) {
+                        earningsHtml = `<span class="earnings-straddle">⚠ 财报 ${formatExpiryMd(posEd)}</span>`;
+                    }
+
                     return `
                         <div class="pos-card ${p.type}">
                             <div class="pos-header">
@@ -757,6 +824,7 @@
                                 ${p.contracts ? `<span>${p.contracts} 张</span>` : ''}
                                 ${cspNotionalHtml}
                                 ${annualHtml}
+                                ${earningsHtml}
                             </div>
                             ${bufferHtml}
                         </div>
@@ -847,6 +915,9 @@
 
             // Volatility health check（RV vs IV 底；volCheck 缺失则整段隐藏）
             renderVolCheck(data.volCheck);
+
+            // 财报日程（下次财报 + 在途横跨提示；earnings 缺失则整段隐藏）
+            renderEarnings(open, data.earnings, data.priceLatestDate);
 
             // Weekly chart
             const TARGET = 1000;

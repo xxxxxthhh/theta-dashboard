@@ -93,6 +93,8 @@ function enrichPortfolioWithMarketData(data, marketPath) {
   if (typeof marketData.latestDate === 'string') data.priceLatestDate = marketData.latestDate;
   // 波动率体检透传（best-effort）：RV vs IV 底。旧格式无此段则忽略，dashboard 自动隐藏 section。
   if (marketData.volCheck && typeof marketData.volCheck === 'object') data.volCheck = marketData.volCheck;
+  // 财报日程透传（best-effort）：TICKER -> 'YYYY-MM-DD' 下次财报日。旧格式无此段则忽略，template 自动隐藏 section。
+  if (marketData.earnings && typeof marketData.earnings === 'object') data.earnings = marketData.earnings;
 
   return {
     marketDataAt: marketData.fetchedAt || null,
