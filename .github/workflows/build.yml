@@ -5,6 +5,10 @@ on:
     types: [data-updated]
   workflow_dispatch:
 
+concurrency:
+  group: dashboard-build
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: ubuntu-latest
