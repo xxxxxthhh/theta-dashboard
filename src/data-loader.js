@@ -88,6 +88,8 @@ function enrichPortfolioWithMarketData(data, marketPath) {
   // 抓取自检透传（best-effort）：字段不存在（旧格式）则忽略，供告警条区分抓取失败/滞后。
   if (Array.isArray(marketData.missing)) data.priceMissing = marketData.missing;
   if (Array.isArray(marketData.stale)) data.priceStale = marketData.stale;
+  // 波动率体检透传（best-effort）：RV vs IV 底。旧格式无此段则忽略，dashboard 自动隐藏 section。
+  if (marketData.volCheck && typeof marketData.volCheck === 'object') data.volCheck = marketData.volCheck;
 
   return {
     marketDataAt: marketData.fetchedAt || null,

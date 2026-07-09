@@ -100,6 +100,17 @@
         .pnl-pos { color: #3fb950; }
         .pnl-neg { color: #f85149; }
 
+        /* Volatility health check (RV vs IV floor) */
+        .vol-note { color: #6e7681; font-size: 12px; line-height: 1.55; margin: -4px 0 14px; }
+        .vol-status { font-size: 11px; padding: 2px 8px; border-radius: 999px; font-weight: 700; white-space: nowrap; }
+        .vol-quiet { background: rgba(210,153,34,0.15); color: #d29922; }   /* 变安静? */
+        .vol-hot { background: rgba(63,185,80,0.14); color: #3fb950; }      /* 够热 */
+        .vol-low { background: rgba(110,118,129,0.18); color: #c9d1d9; }    /* 偏低 */
+        .vol-na { color: #6e7681; }
+        .vol-trend-up { color: #d29922; }    /* 升温 */
+        .vol-trend-down { color: #58a6ff; }  /* 降温 */
+        .vol-trend-flat { color: #6e7681; }  /* 持平 */
+
         /* Chart */
         .chart-wrap { background: #12171f; border: 1px solid #1e2733; border-radius: 12px; padding: 20px; }
 
@@ -175,6 +186,13 @@
             <div class="section" id="idle-section">
                 <h2>持仓股票</h2>
                 <div id="idle-positions"></div>
+            </div>
+
+            <!-- Volatility health check (RV vs IV floor) -->
+            <div class="section" id="volcheck-section">
+                <h2>波动率体检</h2>
+                <div class="vol-note">RV=已实现波动(标的历史,后视)；IV 底=隐含波动阈值。IV 通常高于 RV，RV 低于门槛只提示复核、非自动降档。</div>
+                <div id="volcheck-body"></div>
             </div>
 
             <!-- Weekly Income Chart -->
@@ -390,6 +408,69 @@
 
             el.className = 'attention-strip';
             el.innerHTML = rows.join('');
+        }
+
+        // 波动率体检：RV（已实现，后视）对 IV 底（隐含阈值，前视）的廉价降温预警。
+        // RV≠IV——低于门槛只提示复核、非自动降档（见 section 下 advisory 小字）。
+        // volCheck 缺失/空 → 整段隐藏（degrade，可先于上游 Part A 上线不报错）。
+        function renderVolCheck(volCheck) {
+            const section = document.getElementById('volcheck-section');
+            const body = document.getElementById('volcheck-body');
+            const entries = volCheck && typeof volCheck === 'object' ? Object.entries(volCheck) : [];
+            if (entries.length === 0) {
+                section.style.display = 'none';
+                return;
+            }
+            section.style.display = '';
+
+            const pct = v => (typeof v === 'number' ? Math.round(v * 100) + '%' : '—');
+
+            // 状态：quiet→变安静?橙；rv>=minIv→够热绿；minIv*0.8<=rv<minIv→偏低中性；minIv null→—
+            const statusCell = v => {
+                if (v.minIv == null) return '<span class="vol-na">—</span>';
+                if (v.quiet) return '<span class="vol-status vol-quiet">变安静?</span>';
+                if (typeof v.rv === 'number' && v.rv >= v.minIv) return '<span class="vol-status vol-hot">够热</span>';
+                return '<span class="vol-status vol-low">偏低</span>';
+            };
+
+            // 趋势：rv10 vs rv（升温↑ / 降温↓ / 持平→，0.02 绝对带算持平）
+            const FLAT = 0.02;
+            const trendCell = v => {
+                if (typeof v.rv10 !== 'number' || typeof v.rv !== 'number') return '<span class="vol-trend-flat">—</span>';
+                const d = v.rv10 - v.rv;
+                if (d > FLAT) return '<span class="vol-trend-up">↑ 升温</span>';
+                if (d < -FLAT) return '<span class="vol-trend-down">↓ 降温</span>';
+                return '<span class="vol-trend-flat">→ 持平</span>';
+            };
+
+            body.innerHTML = `
+                <div class="idle-table-wrap">
+                <table class="idle-table">
+                    <thead>
+                        <tr>
+                            <th>标的</th>
+                            <th>年化 RV</th>
+                            <th>趋势</th>
+                            <th>Tier</th>
+                            <th>IV 底</th>
+                            <th>状态</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${entries.map(([ticker, v]) => `
+                            <tr>
+                                <td class="ticker-cell">${ticker}</td>
+                                <td>${pct(v.rv)}</td>
+                                <td>${trendCell(v)}</td>
+                                <td>${v.tier || '—'}</td>
+                                <td>${v.minIv != null ? pct(v.minIv) : '—'}</td>
+                                <td>${statusCell(v)}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+                </div>
+            `;
         }
 
         // ── Render ────────────────────────────────────────────────────────────
@@ -623,6 +704,9 @@
                     </div>
                 `;
             }
+
+            // Volatility health check（RV vs IV 底；volCheck 缺失则整段隐藏）
+            renderVolCheck(data.volCheck);
 
             // Weekly chart
             const TARGET = 1000;
