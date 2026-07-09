@@ -40,10 +40,29 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add index.html
-          if ! git diff --cached --quiet; then
-            git commit -m "build: update dashboard $(date '+%Y-%m-%d')"
-            git push
-          else
-            echo "No changes to deploy"
-          fi
+          # Re-anchor on the live tip of main before each push. actions/checkout
+          # pins github.sha at *dispatch* time, so a second near-simultaneous
+          # trigger would otherwise commit onto a stale base and be rejected with
+          # "fetch first" — concurrency serializes the runs but does not refresh
+          # that base. Reapply the freshly built index.html onto origin/main and
+          # retry if main moved underneath us.
+          built="$RUNNER_TEMP/index.html.built"
+          cp index.html "$built"
+          for attempt in 1 2 3 4 5; do
+            git fetch --quiet origin main
+            git reset --quiet --hard FETCH_HEAD
+            cp "$built" index.html
+            git add index.html
+            if git diff --cached --quiet; then
+              echo "No changes to deploy"
+              exit 0
+            fi
+            git commit --quiet -m "build: update dashboard $(date '+%Y-%m-%d')"
+            if git push origin HEAD:main; then
+              echo "Deployed on attempt $attempt"
+              exit 0
+            fi
+            echo "push rejected (attempt $attempt) — main moved; re-anchoring on latest tip"
+          done
+          echo "Failed to push index.html after 5 attempts" >&2
+          exit 1
