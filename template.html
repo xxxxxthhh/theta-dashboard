@@ -360,6 +360,21 @@
             return Math.max(1, Math.round((e - s) / 86400000));
         }
 
+        // 财报表需要保留 0 天语义：财报日当天显示「今天」，不能复用上面 DTE 的下限 1 天。
+        function rawDaysBetween(startYmd, endYmd) {
+            const s = Date.parse(startYmd + 'T00:00:00Z');
+            const e = Date.parse(endYmd + 'T00:00:00Z');
+            if (Number.isNaN(s) || Number.isNaN(e)) return null;
+            return Math.round((e - s) / 86400000);
+        }
+
+        function formatDaysUntil(days) {
+            if (days == null) return '—';
+            if (days === 0) return '今天';
+            if (days > 0) return `${days} 天`;
+            return `已过 ${Math.abs(days)} 天`;
+        }
+
         // 年化 = 权利金 / 占用资本 / 原始期限 × 365。用开仓日→到期日的原始期限，
         // 不用剩余 DTE（否则临期会虚高）。openDate 缺失则返回 null（不显示，不猜）。
         function getAnnualizedYieldPct(p, costBasisByTicker) {
@@ -506,13 +521,15 @@
             // 该 ticker 的在途期权仓里，财报落在剩余存续期内（asOf <= ed <= expiry）的张数
             const straddleCount = (ticker, ed) => {
                 if (typeof asOf !== 'string') return 0;
-                return (open || []).filter(p => p.ticker === ticker && p.expiry && asOf <= ed && ed <= p.expiry).length;
+                return (open || [])
+                    .filter(p => p.ticker === ticker && p.expiry && asOf <= ed && ed <= p.expiry)
+                    .reduce((sum, p) => sum + getContractCount(p), 0);
             };
 
             const rows = entries
                 .sort((a, b) => a[1].localeCompare(b[1]))   // 按财报日升序
                 .map(([ticker, ed]) => {
-                    const dte = typeof asOf === 'string' ? daysBetween(asOf, ed) : null;
+                    const dte = typeof asOf === 'string' ? rawDaysBetween(asOf, ed) : null;
                     const n = straddleCount(ticker, ed);
                     const impact = n > 0
                         ? `<span class="earnings-straddle">⚠ 在途 ${n} 张横跨</span>`
@@ -521,7 +538,7 @@
                         <tr>
                             <td class="ticker-cell">${ticker}</td>
                             <td>${formatExpiryMd(ed)}</td>
-                            <td>${dte != null ? dte + ' 天' : '—'}</td>
+                            <td>${formatDaysUntil(dte)}</td>
                             <td>${impact}</td>
                         </tr>
                     `;
