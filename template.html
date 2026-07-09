@@ -82,6 +82,11 @@
         .attention-nodata { background: rgba(110,118,129,0.12); border-color: rgba(110,118,129,0.45); color: #8b949e; }
         .attention-ok { background: rgba(63,185,80,0.10); border-color: rgba(63,185,80,0.35); color: #3fb950; }
 
+        /* 到期预结算（周五 ITM/OTM 预判, weekly-close 草稿）——复用 .attention-row/.idle-table/.trade-status */
+        .presettle-overdue { margin-bottom: 12px; font-weight: 700; }
+        .presettle-summary { font-size: 12px; color: #8b949e; margin-bottom: 12px; }
+        .presettle-doubt { font-size: 10px; color: #d29922; margin-top: 3px; }
+
         /* Annualized yield + CC cost-line flags */
         .pos-annual { color: #58a6ff; }
         .cc-flag { font-size: 10px; padding: 2px 7px; border-radius: 99px; font-weight: 700; margin-left: 6px; }
@@ -175,6 +180,13 @@
 
             <!-- Attention strip -->
             <div id="attention-strip"></div>
+
+            <!-- 到期预结算（周五 ITM/OTM 预判, weekly-close 草稿；依收盘价预判、非结算，台账仍是唯一依据） -->
+            <div class="section" id="presettle-section">
+                <h2>到期预结算</h2>
+                <div class="vol-note">依收盘价的大概率预判，非最终结算：临界(pin)与盘后波动可能翻转，OTM 一线之隔仍可能被 assign。这是 weekly-close 的草稿，台账仍是唯一依据、需手动入账。</div>
+                <div id="presettle-body"></div>
+            </div>
 
             <!-- Open Positions -->
             <div class="section">
@@ -473,6 +485,131 @@
             `;
         }
 
+        // 到期预结算：依 fetch job 的 ET 收盘日 priceLatestDate，对临期在途仓做 ITM/OTM 大概率预判。
+        // 这是 weekly-close 的草稿、不是最终结算——临界(pin)与盘后波动可能翻转，OTM 一线之隔仍可能被 assign；
+        // 判定用严格不等号（close==strike 归 pin，不硬判一边）。台账仍是唯一 source of truth，此处只呈现、绝不改台账。
+        // priceLatestDate 缺失（旧格式 market_data）或无临期批次 → 整段隐藏（degrade），不与常规「在途持仓」列表重复。
+        function renderPreSettlement(open, asOf, stale, missing) {
+            const section = document.getElementById('presettle-section');
+            const body = document.getElementById('presettle-body');
+
+            // degrade：无「截至日」→ 整段隐藏（不拿客户端 new Date() 猜到期，避免 viewer 时区偏移）
+            if (typeof asOf !== 'string' || !Array.isArray(open) || open.length === 0) {
+                section.style.display = 'none';
+                return;
+            }
+
+            // 临期筛选：已到期（expiry <= asOf）或本周内到期（dte <= 7）。日期均为 YYYY-MM-DD，字符串比较即时序比较。
+            const imminent = open
+                .filter(p => {
+                    if (!p.expiry) return false;
+                    if (p.expiry <= asOf) return true;                 // 已到期/当日到期
+                    const dte = daysBetween(asOf, p.expiry);
+                    return dte != null && dte <= 7;                    // 本周内到期
+                })
+                .sort((a, b) => a.expiry.localeCompare(b.expiry));     // 到期升序（filter 已返回新数组，不改 open）
+
+            if (imminent.length === 0) {
+                section.style.display = 'none';
+                return;
+            }
+            section.style.display = '';
+
+            const staleSet = new Set(Array.isArray(stale) ? stale : []);
+            const missingSet = new Set(Array.isArray(missing) ? missing : []);
+
+            // 判定 + 预计动作（与台账 lifecycle 标签对齐；着色沿用交易记录 lifecycle 语义色）：
+            // CSP close<strike→ITM 接货(accent) / close>strike→OTM 归零(positive)；
+            // CC  close>strike→ITM 被 call away(warning) / close<strike→OTM 归零(positive)；
+            // close==strike→临界(pin, muted)；无 lastPrice→无价(muted)。
+            const verdictOf = (p) => {
+                if (typeof p.lastPrice !== 'number') return { badge: '无价', action: '待定', tone: 'muted', bucket: 'noprice' };
+                const close = p.lastPrice, strike = p.strike;
+                if (close === strike) return { badge: '临界(pin)', action: '待定', tone: 'muted', bucket: 'pin' };
+                if (p.type === 'CSP') {
+                    return close < strike
+                        ? { badge: 'ITM', action: '接货', tone: 'accent', bucket: 'receive' }
+                        : { badge: 'OTM', action: '归零保留', tone: 'positive', bucket: 'zero' };
+                }
+                return close > strike
+                    ? { badge: 'ITM', action: '被 call away', tone: 'warning', bucket: 'callaway' }
+                    : { badge: 'OTM', action: '归零保留', tone: 'positive', bucket: 'zero' };
+            };
+
+            const counts = { zero: 0, receive: 0, callaway: 0, pin: 0, noprice: 0 };
+            const overdue = [];
+            const rows = imminent.map(p => {
+                const v = verdictOf(p);
+                counts[v.bucket]++;
+                if (p.expiry < asOf) overdue.push(p.ticker);           // 严格早于截至日 = 关账逾期
+
+                // 价格滞后/缺失 → 判定存疑（不拿旧价当准）
+                let doubtHtml = '';
+                if (missingSet.has(p.ticker)) doubtHtml = '<div class="presettle-doubt">价格缺失，判定存疑</div>';
+                else if (staleSet.has(p.ticker)) doubtHtml = '<div class="presettle-doubt">价格滞后，判定存疑</div>';
+
+                const closeCell = typeof p.lastPrice === 'number' ? `$${p.lastPrice.toFixed(2)}` : '—';
+                // 状态：expiry<=asOf → 已到期待关账（醒目、要行动）；否则 预测·收盘价（尚可变动）
+                const statusHtml = p.expiry <= asOf
+                    ? '<span class="trade-status trade-status-danger">已到期 · 待关账</span>'
+                    : '<span class="trade-status trade-status-muted">预测 · 收盘价</span>';
+
+                return `
+                    <tr>
+                        <td>${formatExpiryMd(p.expiry)}</td>
+                        <td class="ticker-cell">${p.ticker}</td>
+                        <td>${p.type}</td>
+                        <td>$${p.strike}</td>
+                        <td>${closeCell}</td>
+                        <td><span class="trade-status trade-status-${v.tone}">${v.badge}</span>${doubtHtml}</td>
+                        <td>${v.action}</td>
+                        <td>${statusHtml}</td>
+                    </tr>
+                `;
+            });
+
+            // 汇总（只列非零项）：本批 N 张：X 归零 / Y 接货 / Z call away / W pin / V 无价
+            const summaryParts = [
+                [counts.zero, '归零'],
+                [counts.receive, '接货'],
+                [counts.callaway, 'call away'],
+                [counts.pin, 'pin'],
+                [counts.noprice, '无价'],
+            ].filter(([n]) => n > 0).map(([n, label]) => `${n} ${label}`);
+            const summaryHtml = `<div class="presettle-summary">本批 ${imminent.length} 张：${summaryParts.join(' / ')}</div>`;
+
+            // 关账逾期警示（expiry < asOf；weekly-close 未做的数据卫生信号）——复用告警条 danger 样式
+            let overdueHtml = '';
+            if (overdue.length) {
+                const list = [...new Set(overdue)].join('、');
+                overdueHtml = `<div class="attention-row attention-danger presettle-overdue"><span class="att-icon">⚠</span><span>关账逾期：${list} 已过到期日，请尽快 weekly-close 入账</span></div>`;
+            }
+
+            body.innerHTML = `
+                ${overdueHtml}
+                ${summaryHtml}
+                <div class="idle-table-wrap">
+                <table class="idle-table">
+                    <thead>
+                        <tr>
+                            <th>到期</th>
+                            <th>标的</th>
+                            <th>类型</th>
+                            <th>Strike</th>
+                            <th>收盘</th>
+                            <th>判定</th>
+                            <th>预计动作</th>
+                            <th>状态</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${rows.join('')}
+                    </tbody>
+                </table>
+                </div>
+            `;
+        }
+
         // ── Render ────────────────────────────────────────────────────────────
 
         function renderDashboard(data) {
@@ -530,6 +667,9 @@
 
             // Attention strip（履约风险分档 + 抓取自检原因）
             renderAttentionStrip(open, data.priceMissing, data.priceStale);
+
+            // 到期预结算（临期 ITM/OTM 预判，weekly-close 草稿；priceLatestDate 缺失或无临期批次则整段隐藏）
+            renderPreSettlement(open, data.priceLatestDate, data.priceStale, data.priceMissing);
 
             // CC 成本线锚：按 ticker 弱关联到持仓股票的接货成本。
             // 这是按 ticker 的弱关联，不是数据契约——股票不在 idle 表则无锚，跳过标记。

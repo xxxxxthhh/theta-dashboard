@@ -88,6 +88,9 @@ function enrichPortfolioWithMarketData(data, marketPath) {
   // 抓取自检透传（best-effort）：字段不存在（旧格式）则忽略，供告警条区分抓取失败/滞后。
   if (Array.isArray(marketData.missing)) data.priceMissing = marketData.missing;
   if (Array.isArray(marketData.stale)) data.priceStale = marketData.stale;
+  // 到期预结算「截至日」透传（best-effort）：用 fetch job 写的 ET 收盘日 latestDate，而非客户端 new Date()
+  // （避免 viewer 时区把到期判早/晚一天）。旧格式无此字段则忽略，template 的预结算 section 自动降级隐藏。
+  if (typeof marketData.latestDate === 'string') data.priceLatestDate = marketData.latestDate;
   // 波动率体检透传（best-effort）：RV vs IV 底。旧格式无此段则忽略，dashboard 自动隐藏 section。
   if (marketData.volCheck && typeof marketData.volCheck === 'object') data.volCheck = marketData.volCheck;
 
