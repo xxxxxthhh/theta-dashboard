@@ -223,6 +223,13 @@
                 </div>
             </div>
 
+            <!-- 单票战绩（closedTrades 按 ticker 聚合） -->
+            <div class="section" id="league-section">
+                <h2>单票战绩</h2>
+                <div class="vol-note">仅已实现交易，净额口径（止盈已扣买回、止损为负）。Assign=接货或被 call away。高 assign 率或亏损集中的标的是 tier 复核信号。</div>
+                <div id="league-body"></div>
+            </div>
+
             <!-- Trade History -->
             <div class="section">
                 <h2>交易记录</h2>
@@ -561,6 +568,62 @@
             `;
         }
 
+        // 单票战绩：closedTrades（剔除待到期）按 ticker 聚合，按净权利金降序。
+        // premium 是净额（止盈已扣买回、止损为负），直接求和即净权利金。
+        // Assign = assigned===true（接货或被 call away）；高 assign 率 / 亏损集中是 tier 复核信号（只呈现，不自动改档）。
+        // closedTrades 为空 → 整段隐藏（degrade）。
+        function renderTickerLeague(closed) {
+            const section = document.getElementById('league-section');
+            const body = document.getElementById('league-body');
+            const agg = {};
+            for (const t of closed || []) {
+                if (/待到期/.test(t.result || '')) continue;
+                const a = agg[t.ticker] || (agg[t.ticker] = { count: 0, premium: 0, assigned: 0, losses: 0 });
+                a.count++;
+                a.premium += t.premium || 0;
+                if (t.assigned) a.assigned++;
+                if ((t.premium || 0) < 0) a.losses++;
+            }
+            const entries = Object.entries(agg).sort((a, b) => b[1].premium - a[1].premium);
+            if (entries.length === 0) { section.style.display = 'none'; return; }
+            section.style.display = '';
+
+            const money = v => {
+                const cls = v >= 0 ? 'pnl-pos' : 'pnl-neg';
+                const sign = v >= 0 ? '+' : '-';
+                return `<span class="${cls}">${sign}$${Math.abs(Math.round(v)).toLocaleString()}</span>`;
+            };
+
+            body.innerHTML = `
+                <div class="idle-table-wrap">
+                <table class="idle-table">
+                    <thead>
+                        <tr>
+                            <th>标的</th>
+                            <th>笔数</th>
+                            <th>净权利金</th>
+                            <th>平均/笔</th>
+                            <th>Assign</th>
+                            <th>亏损笔</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${entries.map(([ticker, a]) => `
+                            <tr>
+                                <td class="ticker-cell">${ticker}</td>
+                                <td>${a.count}</td>
+                                <td>${money(a.premium)}</td>
+                                <td>${money(a.premium / a.count)}</td>
+                                <td>${a.assigned > 0 ? `${a.assigned} (${Math.round(a.assigned / a.count * 100)}%)` : '—'}</td>
+                                <td>${a.losses > 0 ? `<span class="pnl-neg">${a.losses}</span>` : '—'}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+                </div>
+            `;
+        }
+
         // 到期预结算：依 fetch job 的 ET 收盘日 priceLatestDate，对临期在途仓做 ITM/OTM 大概率预判。
         // 这是 weekly-close 的草稿、不是最终结算——临界(pin)与盘后波动可能翻转，OTM 一线之隔仍可能被 assign；
         // 判定用严格不等号（close==strike 归 pin，不硬判一边）。台账仍是唯一 source of truth，此处只呈现、绝不改台账。
@@ -711,6 +774,23 @@
                 cspNotionalByTicker[p.ticker] = (cspNotionalByTicker[p.ticker] || 0) + notional;
             }
             const cspNotional = Object.values(cspNotionalByTicker).reduce((s, value) => s + value, 0);
+
+            // 近4周 run-rate：每周取「自身及之前最近 4 个非 pending 周」的 realized 均值；
+            // 不足 4 个非 pending 周 → null 不画（避免早期均值失真），pending 周自身也为 null。
+            const AVG_WINDOW = 4;
+            const rollingAvg = weekly.map((w, i) => {
+                if (w.pending) return null;
+                const win = [];
+                for (let j = i; j >= 0 && win.length < AVG_WINDOW; j--) {
+                    if (!weekly[j].pending) win.push(weekly[j].realized);
+                }
+                if (win.length < AVG_WINDOW) return null;
+                return win.reduce((s, v) => s + v, 0) / AVG_WINDOW;
+            });
+            const latestAvg = [...rollingAvg].reverse().find(v => v != null);
+            const realizedSub = latestAvg != null
+                ? `${realizedCount} 笔 · 近4周均 $${Math.round(latestAvg).toLocaleString()}/周`
+                : `${realizedCount} 笔交易`;
             const topCspNotional = Object.entries(cspNotionalByTicker)
                 .sort((a, b) => b[1] - a[1])[0];
             const topCspSub = topCspNotional
@@ -722,7 +802,7 @@
                 <div class="stat-card">
                     <div class="label">累计已实现</div>
                     <div class="value green">$${totalRealized.toLocaleString()}</div>
-                    <div class="sub">${realizedCount} 笔交易</div>
+                    <div class="sub">${realizedSub}</div>
                 </div>
                 <div class="stat-card">
                     <div class="label">在途权利金</div>
@@ -752,6 +832,14 @@
             const costBasisByTicker = {};
             for (const p of idle) {
                 if (typeof p.costBasis === 'number') costBasisByTicker[p.ticker] = p.costBasis;
+            }
+
+            // 单票经济账：该 ticker 全历史已实现净权利金（剔除待到期，与 totalRealized 口径一致）。
+            // wheel 记账法：全部权利金（含持股前 CSP 期）摊给当前持股，压出有效成本。
+            const premiumByTicker = {};
+            for (const t of closed) {
+                if (/待到期/.test(t.result || '')) continue;
+                premiumByTicker[t.ticker] = (premiumByTicker[t.ticker] || 0) + (t.premium || 0);
             }
 
             // Open positions
@@ -888,6 +976,7 @@
                 idleSection.style.display = 'none';
             } else {
                 idleEl.innerHTML = `
+                    <div class="vol-note">累计权利金=该标的全历史已实现净权利金（含持股前 CSP，摊给当前持股是简化记账）；有效成本=成本均价−权利金/股；真实盈亏=浮盈+累计权利金（wheel 全周期口径）。</div>
                     <div class="idle-table-wrap">
                     <table class="idle-table">
                         <thead>
@@ -898,6 +987,9 @@
                                 <th>现价</th>
                                 <th>市值成本</th>
                                 <th>浮盈</th>
+                                <th>累计权利金</th>
+                                <th>有效成本</th>
+                                <th>真实盈亏</th>
                                 <th>可卖 CC</th>
                                 <th>备注</th>
                             </tr>
@@ -911,6 +1003,20 @@
                                     const sign = p.unrealizedDollar >= 0 ? '+' : '';
                                     pnlCell = `<span class="${cls}">${sign}$${Math.round(p.unrealizedDollar).toLocaleString()} (${sign}${p.unrealizedPct.toFixed(1)}%)</span>`;
                                 }
+                                const cum = premiumByTicker[p.ticker] || 0;
+                                const cumCls = cum >= 0 ? 'pnl-pos' : 'pnl-neg';
+                                const cumSign = cum >= 0 ? '+' : '-';
+                                const cumCell = cum !== 0
+                                    ? `<span class="${cumCls}">${cumSign}$${Math.abs(Math.round(cum)).toLocaleString()}</span>`
+                                    : '—';
+                                const effCell = p.shares > 0 ? `$${(p.costBasis - cum / p.shares).toFixed(2)}` : '—';
+                                let trueCell = '—';
+                                if (typeof p.unrealizedDollar === 'number') {
+                                    const total = p.unrealizedDollar + cum;
+                                    const cls = total >= 0 ? 'pnl-pos' : 'pnl-neg';
+                                    const sign = total >= 0 ? '+' : '-';
+                                    trueCell = `<span class="${cls}">${sign}$${Math.abs(Math.round(total)).toLocaleString()}</span>`;
+                                }
                                 return `
                                 <tr>
                                     <td class="ticker-cell">${p.ticker}</td>
@@ -919,6 +1025,9 @@
                                     <td>${priceCell}</td>
                                     <td>$${(p.shares * p.costBasis).toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
                                     <td>${pnlCell}</td>
+                                    <td>${cumCell}</td>
+                                    <td>${effCell}</td>
+                                    <td>${trueCell}</td>
                                     <td>${p.canSellCC ? '<span class="cc-yes">✓ 可卖</span>' : '<span class="cc-no">–</span>'}</td>
                                     <td style="color:#6e7681; font-size:12px;">${p.note || ''}</td>
                                 </tr>
@@ -935,6 +1044,9 @@
 
             // 财报日程（下次财报 + 在途横跨提示；earnings 缺失则整段隐藏）
             renderEarnings(open, data.earnings, data.priceLatestDate);
+
+            // 单票战绩（closedTrades 聚合；为空则整段隐藏）
+            renderTickerLeague(closed);
 
             // Weekly chart
             const TARGET = 1000;
@@ -954,6 +1066,18 @@
                         borderColor: borders,
                         borderWidth: 2,
                         borderRadius: 5,
+                    }, {
+                        // 近4周 run-rate 均值线（不足 4 个非 pending 周为 null，spanGaps=false 不补线）
+                        type: 'line',
+                        label: '近4周均值',
+                        data: rollingAvg,
+                        borderColor: '#bc8cff',
+                        backgroundColor: 'transparent',
+                        borderWidth: 2,
+                        pointRadius: 0,
+                        pointHitRadius: 6,
+                        tension: 0.3,
+                        spanGaps: false,
                     }]
                 },
                 options: {
@@ -964,6 +1088,9 @@
                         tooltip: {
                             callbacks: {
                                 label: ctx => {
+                                    if (ctx.dataset.label === '近4周均值') {
+                                        return `近4周均值 $${Math.round(ctx.parsed.y).toLocaleString()}`;
+                                    }
                                     const w = weekly[ctx.dataIndex];
                                     return `$${ctx.parsed.y.toLocaleString()} · ${w.trades} 笔${w.pending ? ' · 待确认' : ''}`;
                                 }
