@@ -62,6 +62,9 @@
         .pos-price-row { display: flex; align-items: center; gap: 12px; font-size: 12px; color: #6e7681; margin-top: 6px; }
         .buffer-bar { flex: 1; max-width: 100px; height: 3px; background: #1e2733; border-radius: 2px; overflow: hidden; }
         .buffer-bar-fill { height: 100%; border-radius: 2px; }
+        .pos-spark-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+        .buffer-spark { flex-shrink: 0; display: block; }
+        .pos-spark-label { font-size: 11px; color: #6e7681; }
         .market-data-ts { font-size: 10px; color: #484f58; text-align: right; margin-bottom: 8px; }
         .expiry-group { margin-bottom: 16px; }
         .expiry-group-header { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 14px; margin-bottom: 10px; background: #0d1117; border: 1px solid #1e2733; border-radius: 8px; color: #c9d1d9; }
@@ -276,6 +279,41 @@
             return `${Number(parts[1])}/${Number(parts[2])}`;
         }
 
+        // 手绘 buffer 轨迹 sparkline：X 等距、Y=bufferPct，含强制 bufferPct=0 水平零线（ITM 边界）——
+        // 零线是这个图的全部意义，看折线是否在逼近/穿越零。折线按末点状态着色（≥5 绿 / 0–5 橙 / <0 红），
+        // Y 值域始终含 0 并把点 clamp 进视图。仅 ≥2 点渲染（新仓位不留破图）。不为每张卡 new Chart 实例。
+        function renderBufferSparkline(history) {
+            if (!Array.isArray(history) || history.length < 2) return '';
+            const W = 88, H = 24, padX = 3, padY = 3;
+            const vals = history.map(pt => pt.bufferPct);
+            let lo = Math.min(0, ...vals);
+            let hi = Math.max(0, ...vals);
+            if (hi === lo) { hi += 1; lo -= 1; } // 退化保护：全相等时给一点跨度
+            const x = i => padX + (W - 2 * padX) * (i / (history.length - 1));
+            const y = v => {
+                const c = Math.max(lo, Math.min(hi, v));
+                return padY + (H - 2 * padY) * (1 - (c - lo) / (hi - lo));
+            };
+            const last = vals[vals.length - 1];
+            const color = last >= 5 ? '#3fb950' : last >= 0 ? '#d29922' : '#f85149';
+            const zeroY = y(0).toFixed(1);
+            const pts = history.map((pt, i) => `${x(i).toFixed(1)},${y(pt.bufferPct).toFixed(1)}`).join(' ');
+            const lx = x(history.length - 1).toFixed(1), ly = y(last).toFixed(1);
+            return `<svg class="buffer-spark" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" aria-hidden="true">`
+                + `<line x1="${padX}" y1="${zeroY}" x2="${W - padX}" y2="${zeroY}" stroke="#484f58" stroke-width="0.75" stroke-dasharray="2 2"/>`
+                + `<polyline points="${pts}" fill="none" stroke="${color}" stroke-width="1.25" stroke-linejoin="round" stroke-linecap="round"/>`
+                + `<circle cx="${lx}" cy="${ly}" r="1.6" fill="${color}"/></svg>`;
+        }
+
+        // 轨迹行 = sparkline + 首→末文本「轨迹 +8.1% → +4.9%」（history 已在 data-loader 裁剪到 openDate 之后）
+        function renderBufferTrajectory(history) {
+            const svg = renderBufferSparkline(history);
+            if (!svg) return '';
+            const fmt = v => (v >= 0 ? '+' : '') + v.toFixed(1) + '%';
+            const first = history[0].bufferPct, last = history[history.length - 1].bufferPct;
+            return `<div class="pos-spark-row">${svg}<span class="pos-spark-label">轨迹 ${fmt(first)} → ${fmt(last)}</span></div>`;
+        }
+
         // 用字符串日期（YYYY-MM-DD）按 UTC 零点算日历日差，避免本地时区偏移；下限 1 天
         function daysBetween(startYmd, endYmd) {
             const s = Date.parse(startYmd + 'T00:00:00Z');
@@ -303,7 +341,7 @@
 
         // 履约风险告警条：把 buffer 从被动小字提升为主动分档提示。
         // 三态必须齐全——「无数据」和危险态同等重要，刚开的仓最容易落在无数据。
-        function renderAttentionStrip(open) {
+        function renderAttentionStrip(open, priceMissing, priceStale) {
             const el = document.getElementById('attention-strip');
             if (!open || open.length === 0) { el.className = ''; el.innerHTML = ''; return; }
 
@@ -334,8 +372,17 @@
                 rows.push(`<div class="attention-row attention-warn"><span class="att-icon">◔</span><span>buffer 不足 5%：${list}</span></div>`);
             }
             if (noData.length) {
-                const list = noData.map(p => p.ticker).join('、');
-                rows.push(`<div class="attention-row attention-nodata"><span class="att-icon">○</span><span>${noData.length} 张持仓无价格数据（${list}）</span></div>`);
+                // Part C：区分「抓取失败」（ticker 进了 missing）与「真实缺口」，让抓取自检真正被看见。
+                const missingSet = new Set(priceMissing || []);
+                const failed = noData.filter(p => missingSet.has(p.ticker)).map(p => p.ticker);
+                const reason = failed.length
+                    ? `（因抓取失败：${failed.join('、')}）`
+                    : `（${noData.map(p => p.ticker).join('、')}）`;
+                rows.push(`<div class="attention-row attention-nodata"><span class="att-icon">○</span><span>${noData.length} 张持仓无价格数据${reason}</span></div>`);
+            }
+            // 价格滞后（拿到价但 date 落后于 latestDate）——独立提示，别人更新了它没更新
+            if (Array.isArray(priceStale) && priceStale.length) {
+                rows.push(`<div class="attention-row attention-nodata"><span class="att-icon">○</span><span>价格滞后：${priceStale.join('、')}</span></div>`);
             }
             if (rows.length === 0) {
                 rows.push(`<div class="attention-row attention-ok"><span class="att-icon">✓</span><span>全部在途 CSP buffer ≥ 5%，价格齐全</span></div>`);
@@ -400,8 +447,8 @@
                 </div>
             `;
 
-            // Attention strip（履约风险分档）
-            renderAttentionStrip(open);
+            // Attention strip（履约风险分档 + 抓取自检原因）
+            renderAttentionStrip(open, data.priceMissing, data.priceStale);
 
             // CC 成本线锚：按 ticker 弱关联到持仓股票的接货成本。
             // 这是按 ticker 的弱关联，不是数据契约——股票不在 idle 表则无锚，跳过标记。
@@ -444,7 +491,8 @@
                                 <span>收盘 $${p.lastPrice.toFixed(2)}</span>
                                 <span class="${bufClass}">${sign}${p.bufferPct.toFixed(1)}%${itm}</span>
                                 <div class="buffer-bar"><div class="buffer-bar-fill" style="width:${barWidth}%;background:${barColor};"></div></div>
-                            </div>`;
+                            </div>
+                            ${renderBufferTrajectory(p.bufferHistory)}`;
                     }
 
                     const cspNotionalHtml = p.type === 'CSP'

@@ -36,6 +36,21 @@ function enrichOpenPositionWithMarketData(position, info) {
   }
 
   position.bufferPct = +(position.bufferDollar / info.close * 100).toFixed(2);
+
+  // buffer 轨迹：用与上面完全相同的公式，对每个历史点算 bufferPct。
+  // 附加字段——旧格式 market_data（无 history）静默降级，不产出 bufferHistory。
+  if (Array.isArray(info.history) && info.history.length) {
+    // 有 openDate 时裁剪到「持有这张之后」，持仓前的标的价不算 buffer 风险。
+    const points = info.history.filter((pt) =>
+      pt && typeof pt.close === 'number' && pt.close !== 0 &&
+      (!position.openDate || pt.date >= position.openDate)
+    );
+    const bufferHistory = points.map((pt) => {
+      const dollar = position.type === 'CC' ? position.strike - pt.close : pt.close - position.strike;
+      return { date: pt.date, bufferPct: +(dollar / pt.close * 100).toFixed(2) };
+    });
+    if (bufferHistory.length) position.bufferHistory = bufferHistory;
+  }
 }
 
 function enrichIdlePositionWithMarketData(position, info) {
@@ -70,6 +85,9 @@ function enrichPortfolioWithMarketData(data, marketPath) {
   }
 
   if (marketData.fetchedAt) data.marketDataAt = marketData.fetchedAt;
+  // 抓取自检透传（best-effort）：字段不存在（旧格式）则忽略，供告警条区分抓取失败/滞后。
+  if (Array.isArray(marketData.missing)) data.priceMissing = marketData.missing;
+  if (Array.isArray(marketData.stale)) data.priceStale = marketData.stale;
 
   return {
     marketDataAt: marketData.fetchedAt || null,
