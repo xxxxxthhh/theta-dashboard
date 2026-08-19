@@ -3,11 +3,17 @@ const fs = require('fs');
 const path = require('path');
 const { validatePortfolio } = require('./validate');
 const { encrypt } = require('./encrypt');
-const { resolveDataFile, enrichPortfolioWithMarketData } = require('./data-loader');
+const {
+  resolveDataFile,
+  loadPublishedIbkrPortfolio,
+  enrichPortfolioWithMarketData,
+} = require('./data-loader');
 
 const ROOT = path.join(__dirname, '..');
 const TEMPLATE_PATH = path.join(ROOT, 'template.html');
-const OUT_PATH = path.join(ROOT, 'index.html');
+const OUT_PATH = process.env.DASHBOARD_OUTPUT_PATH
+  ? path.resolve(process.env.DASHBOARD_OUTPUT_PATH)
+  : path.join(ROOT, 'index.html');
 
 function build() {
   const password = process.env.DASHBOARD_PASS;
@@ -16,7 +22,8 @@ function build() {
   }
 
   const jsonPath = resolveDataFile(ROOT, 'portfolio_data.json', true);
-  const marketPath = resolveDataFile(ROOT, 'market_data.json', false);
+  const marketPath = resolveDataFile(ROOT, 'market_data.json', true);
+  const brokerPath = resolveDataFile(ROOT, path.join('published', 'ibkr-latest.json'), true);
 
   // Step 1: Load upstream data
   console.log('→ Step 1: Loading upstream portfolio data...');
@@ -24,31 +31,32 @@ function build() {
 
   // Step 2: Validate
   console.log('\n→ Step 2: Validating portfolio data...');
-  const data = validatePortfolio(jsonPath);
+  const historicalData = validatePortfolio(jsonPath);
 
-  // Step 3: Enrich with market price data
-  console.log('\n→ Step 3: Enriching with market prices...');
-  if (marketPath) {
-    try {
-      console.log(`   Using ${marketPath}`);
-      const { openEnriched, idleEnriched } = enrichPortfolioWithMarketData(data, marketPath);
-      console.log(`   Enriched ${openEnriched}/${data.openPositions.length} open positions`);
-      console.log(`   Enriched ${idleEnriched}/${data.idlePositions.length} idle holdings`);
-    } catch (err) {
-      console.warn(`   Warning: could not read market_data.json - ${err.message}`);
-    }
-  } else {
-    console.log('   No market_data.json found in upstream data dir, skipping enrichment');
-  }
+  // Step 3: Replace current positions with the broker-only published read model.
+  // Historical closed trades and weekly summaries remain display projections.
+  console.log('\n→ Step 3: Loading reconciled IBKR current positions...');
+  console.log(`   Using ${brokerPath}`);
+  const data = loadPublishedIbkrPortfolio(brokerPath, historicalData);
+  console.log(`   Broker as-of ${data.brokerAsOf} · sync run ${data.brokerSyncRunId}`);
+  console.log(`   Current positions: ${data.openPositions.length} options · ${data.idlePositions.length} stocks`);
 
-  // Step 4: Encrypt
-  console.log('\n→ Step 4: Encrypting...');
+  // Step 4: Enrich with market price data. The market session must match the
+  // broker snapshot; mixed-day builds fail closed and wait for the next sync.
+  console.log('\n→ Step 4: Enriching with market prices...');
+  console.log(`   Using ${marketPath}`);
+  const { openEnriched, idleEnriched } = enrichPortfolioWithMarketData(data, marketPath);
+  console.log(`   Enriched ${openEnriched}/${data.openPositions.length} open positions`);
+  console.log(`   Enriched ${idleEnriched}/${data.idlePositions.length} stock holdings`);
+
+  // Step 5: Encrypt
+  console.log('\n→ Step 5: Encrypting...');
   const enc = encrypt(data, password);
   const jsonSize = JSON.stringify(data).length;
   console.log(`   Raw data: ${jsonSize} bytes → Encrypted: ${enc.data.length} chars`);
 
-  // Step 5: Inject into template
-  console.log('\n→ Step 5: Building index.html...');
+  // Step 6: Inject into template
+  console.log('\n→ Step 6: Building index.html...');
   if (!fs.existsSync(TEMPLATE_PATH)) {
     throw new Error(`template.html not found at ${TEMPLATE_PATH}`);
   }

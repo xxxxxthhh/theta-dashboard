@@ -754,7 +754,15 @@
         function renderDashboard(data) {
             // Updated at
             if (data.updatedAt) {
-                document.getElementById('updated-at').textContent = `更新于 ${data.updatedAt}`;
+                const sourceLabel = data.currentPositionSource === 'ibkr-flex' ? 'IBKR 实盘' : '展示投影';
+                const historyLabel = data.historicalUpdatedAt
+                    ? ` · 历史投影截至 ${data.historicalUpdatedAt}`
+                    : '';
+                const t4Label = data.t4 && data.t4.status
+                    ? ` · T4 ${data.t4.status}`
+                    : '';
+                document.getElementById('updated-at').textContent =
+                    `${sourceLabel}截至 ${data.updatedAt}${historyLabel}${t4Label}`;
             }
 
             const open = data.openPositions || [];
@@ -912,6 +920,15 @@
                         earningsHtml = `<span class="earnings-straddle">⚠ 财报 ${formatExpiryMd(posEd)}</span>`;
                     }
 
+                    let brokerMarkHtml = '';
+                    if (typeof p.markPrice === 'number' && typeof p.unrealizedDollar === 'number') {
+                        const pnlClass = p.unrealizedDollar >= 0 ? 'pnl-pos' : 'pnl-neg';
+                        const pnlSign = p.unrealizedDollar >= 0 ? '+' : '-';
+                        brokerMarkHtml = `
+                            <span>IBKR mark $${p.markPrice.toFixed(2)}</span>
+                            <span class="${pnlClass}">浮盈 ${pnlSign}$${Math.abs(Math.round(p.unrealizedDollar)).toLocaleString()}</span>`;
+                    }
+
                     return `
                         <div class="pos-card ${p.type}">
                             <div class="pos-header">
@@ -928,6 +945,7 @@
                                 <span class="${dteClass}">${dteLabel}</span>
                                 ${p.contracts ? `<span>${p.contracts} 张</span>` : ''}
                                 ${cspNotionalHtml}
+                                ${brokerMarkHtml}
                                 ${annualHtml}
                                 ${earningsHtml}
                             </div>

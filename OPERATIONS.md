@@ -8,10 +8,15 @@
 
 ## 输入约定
 
-本仓库构建时只读取两个上游文件：
+本仓库构建时读取三个上游文件：
 
-- `portfolio_data.json`
-- `market_data.json`
+- `published/ibkr-latest.json`：IBKR broker-only 当前持仓、现金与 T4 元数据；当前仓位唯一事实源
+- `portfolio_data.json`：已实现交易、周度汇总等历史展示投影
+- `market_data.json`：与 brokerAsOf 同一交易日的收盘行情
+
+构建会验证 published 快照的发布者、IBKR authority、reconciliation、sync gate、
+日期绑定和 `stateSha256`。任一失败或 `market_data.latestDate != brokerAsOf` 时构建
+直接失败，绝不退回 `portfolio_data.json` 冒充当前持仓。
 
 `src/build.js` 的查找顺序如下：
 
@@ -60,11 +65,12 @@ node src/build-local.js
 
 ## CI 行为
 
-- `theta-dashboard/.github/workflows/build.yml` 只在两种情况下运行：
+- `theta-dashboard/.github/workflows/build.yml` 在以下情况下运行：
   - 收到 `repository_dispatch(data-updated)`
   - 手工 `workflow_dispatch`
-- 修改 `src/*.js` 或 `template.html` 后，需要手工触发 CI 重建
-- 自动重建来自 `theta-data` 推送新的 `portfolio_data.json` 或 `market_data.json`
+  - `main` 上的构建代码、模板、测试或 workflow 发生变化
+- 自动数据重建来自 `theta-data` 推送新的 `published/ibkr-latest.json`、
+  `portfolio_data.json` 或 `market_data.json`
 
 ---
 
@@ -75,7 +81,7 @@ node src/build-local.js
 | `src/build.js` | 读取上游 JSON、校验、补充市场数据、加密并生成页面 |
 | `src/build-local.js` | 读取上游 JSON、校验并生成本地分析页，不加密 |
 | `src/validate.js` | 在加密前校验上游 `portfolio_data.json` |
-| `src/data-loader.js` | 共享数据入口，负责定位上游 JSON 并补充市场数据 |
+| `src/data-loader.js` | 共享数据入口，验证/映射 broker-only 当前仓位并补充市场数据 |
 | `src/encrypt.js` | AES-256-GCM 加密模块 |
 | `template.html` | 页面模板 |
 | `local-template.html` | 本地分析页模板 |
@@ -90,6 +96,7 @@ node src/build-local.js
 - `portfolio_data.json` 和 `market_data.json` 可以临时放在仓库根目录做本地覆盖
 - 这两个文件默认都被 `.gitignore` 排除，不应提交
 - `local-analytics.html` 也是本地专用产物，默认忽略不提交
+- `published/ibkr-latest.json` 用于覆盖当前 `openPositions`、`idlePositions`、现金和截至日
 - `market_data.json` 用于补齐 `openPositions` 的 `lastPrice`、`bufferDollar` 和 `bufferPct`
 - 同时也会补齐 `idlePositions` 的 `lastPrice`、`marketValue` 和 `unrealized` 数据，供本地分析页使用
 

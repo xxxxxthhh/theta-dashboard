@@ -4,6 +4,13 @@ on:
   repository_dispatch:
     types: [data-updated]
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/build.yml'
+      - 'src/**'
+      - 'template.html'
+      - 'tests/**'
 
 concurrency:
   group: dashboard-build
@@ -29,6 +36,9 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+
+      - name: Test dashboard data contract
+        run: node --test ./tests/*.test.js
 
       - name: Build dashboard
         run: node src/build.js
