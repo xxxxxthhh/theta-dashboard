@@ -71,6 +71,21 @@ node src/build-local.js
   - `main` 上的构建代码、模板、测试或 workflow 发生变化
 - 自动数据重建来自 `theta-data` 推送新的 `published/ibkr-latest.json`、
   `portfolio_data.json` 或 `market_data.json`
+- CI 在构建前运行 `node src/build-readiness.js`，复用同一份 `theta-data`
+  checkout 的 `scripts/lib/market_time.js` XNYS 日历。测试也需要该 checkout，
+  可通过 `THETA_DATA_DIR` 指定；本地默认使用同级 `../theta-data`。
+- 两份输入都达到最近已完成的 XNYS session 才构建。收盘后只有上一 session
+  的正常延迟会暂缓（包括任一输入先到、或两份输入都还没更新），在 Actions
+  notice 和 summary 中记录日期及截止时间，并跳过构建和发布。
+- 等待截止是该 session 次日 19:00 Asia/Singapore（11:00 UTC），给现有
+  16:00 主采集及 17:00 补偿采集留出窗口，并覆盖 `--deadline-et 05:30`
+  的重试上限（夏令时为新加坡 17:30、冬令时为 18:30）及额外半小时。
+  周末和假日不会延长截止时间。
+  更旧、未来、非法日期或无效 broker authority / reconciliation / hash 立即失败；
+  截止后未对齐也失败。原有构建日期校验继续执行。
+- GitHub Actions 每周二至周六 11:00 UTC 复查，即使采集失败后没有 push 事件，
+  仍能显示 stale failure；Actions 定时运行可能延迟，手工运行同样执行上述检查。
+  这项复查不修改采集机器的系统定时任务，不抓取 Flex，也不修改数据。
 
 ---
 
