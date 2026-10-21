@@ -1,0 +1,44 @@
+name: Validate Dashboard
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/*.yml'
+      - 'src/**'
+      - 'template.html'
+      - 'tests/**'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    # The shared calendar is in a private repository. Forks cannot use GH_PAT.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout dashboard
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Checkout shared XNYS calendar only
+        uses: actions/checkout@v4
+        with:
+          repository: xxxxxthhh/theta-data
+          ref: main
+          token: ${{ secrets.GH_PAT }}
+          path: theta-data
+          persist-credentials: false
+          sparse-checkout: /scripts/lib/market_time.js
+          sparse-checkout-cone-mode: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Test contracts, readiness and synthetic encrypted builds
+        run: node --test ./tests/*.test.js
+        env:
+          THETA_DATA_DIR: theta-data
