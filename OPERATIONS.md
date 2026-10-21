@@ -86,6 +86,10 @@ node src/build-local.js
 - GitHub Actions 每周二至周六 11:00 UTC 复查，即使采集失败后没有 push 事件，
   仍能显示 stale failure；Actions 定时运行可能延迟，手工运行同样执行上述检查。
   这项复查不修改采集机器的系统定时任务，不抓取 Flex，也不修改数据。
+- 同仓库 PR 运行独立 `Validate Dashboard`，只检出上游共享日历并用合成数据
+  验证契约、等待/超时及加密构建；不使用生产密码，不发布页面。外部 fork 因无法
+  读取私有上游而跳过该 job。可在功能分支手工运行 Build & Deploy 验证真实输入的
+  readiness；只有 `refs/heads/main` 且 `ready=true` 才能提交和推送页面。
 
 ---
 

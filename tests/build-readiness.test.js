@@ -25,6 +25,18 @@ test('reported overnight market-first mismatch defers; either arrival order reco
   }
 });
 
+test('October 20 failure waits for the next collector window, then fails at the deadline', () => {
+  const broker = '2026-10-19';
+  const market = '2026-10-20';
+  for (const now of ['2026-10-20T21:38:34Z', '2026-10-21T03:38:00Z', '2026-10-21T10:59:59Z']) {
+    const result = assess(broker, market, now);
+    assert.equal(result.ready, false);
+    assert.match(result.message, /2026-10-21T11:00:00.000Z/);
+  }
+  assert.throws(() => assess(broker, market, '2026-10-21T11:00:00Z'), /stale or inconsistent/);
+  assert.equal(assess(market, market, '2026-10-21T08:00:00Z').ready, true);
+});
+
 test('aligned current session builds before and after collection deadline', () => {
   for (const time of ['2026-09-30T21:40:00Z', '2026-10-01T11:00:00Z', '2026-10-01T15:00:00Z']) {
     assert.equal(assess('2026-09-30', '2026-09-30', time).ready, true);
@@ -163,17 +175,35 @@ test('workflow gate returns explicit ready output, summary and failure status wi
   }
 });
 
-test('aligned synthetic data still builds; direct mismatched build retains hard date guard', t => {
+test('aligned synthetic data builds and decrypts; direct mismatched build retains hard date guard', async t => {
   for (const [brokerDate, expectedStatus] of [['2026-09-30', 0], ['2026-09-29', 1]]) {
     const { dir } = fixture(t, brokerDate);
     const out = path.join(dir, 'built.html');
+    const password = crypto.randomBytes(24).toString('hex');
     const result = spawnSync(process.execPath, ['src/build.js'], {
       cwd: ROOT, encoding: 'utf8',
-      env: { ...isolatedEnv(dir), DASHBOARD_PASS: crypto.randomBytes(24).toString('hex'), DASHBOARD_OUTPUT_PATH: out },
+      env: { ...isolatedEnv(dir), DASHBOARD_PASS: password, DASHBOARD_OUTPUT_PATH: out },
     });
     assert.equal(result.status, expectedStatus, result.stderr);
     assert.equal(fs.existsSync(out), expectedStatus === 0);
     if (expectedStatus === 1) assert.match(result.stderr, /does not match brokerAsOf/);
+    else {
+      const html = fs.readFileSync(out, 'utf8');
+      assert.equal(html.includes('__ENCRYPTED_DATA__'), false);
+      const encrypted = JSON.parse(html.match(/const ENC = (\{[^\n]+\});/)[1]);
+      // Exercise the browser's WebCrypto format, including GCM's appended tag.
+      const subtle = crypto.webcrypto.subtle;
+      const material = await subtle.importKey('raw', Buffer.from(password), 'PBKDF2', false, ['deriveKey']);
+      const key = await subtle.deriveKey({
+        name: 'PBKDF2', salt: Buffer.from(encrypted.salt, 'base64'), iterations: 100000, hash: 'SHA-256',
+      }, material, { name: 'AES-GCM', length: 256 }, false, ['decrypt']);
+      const plaintext = await subtle.decrypt({ name: 'AES-GCM', iv: Buffer.from(encrypted.iv, 'base64') }, key,
+        Buffer.concat([Buffer.from(encrypted.data, 'base64'), Buffer.from(encrypted.tag, 'base64')]));
+      const data = JSON.parse(Buffer.from(plaintext).toString('utf8'));
+      assert.equal(data.brokerAsOf, brokerDate);
+      assert.equal(data.priceLatestDate, brokerDate);
+      assert.equal(data.positionAuthority.mode, 'ibkr-only');
+    }
   }
 });
 

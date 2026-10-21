@@ -62,7 +62,8 @@ jobs:
           DASHBOARD_PASS: ${{ secrets.DASHBOARD_PASS }}
 
       - name: Commit and push index.html
-        if: steps.readiness.outputs.ready == 'true'
+        # Feature-branch workflow_dispatch is validation only.
+        if: steps.readiness.outputs.ready == 'true' && github.ref == 'refs/heads/main'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
