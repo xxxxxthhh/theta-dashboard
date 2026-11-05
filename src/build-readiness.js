@@ -48,6 +48,19 @@ function checkReadiness(root = ROOT, now = new Date()) {
   // positions must fail even during the normal collection window.
   const data = loadPublishedIbkrPortfolio(brokerPath, {});
   const market = JSON.parse(fs.readFileSync(marketPath, 'utf8'));
+  const requiredTickers = new Set([
+    ...(data.openPositions || []).map(position => position.ticker),
+    ...(data.idlePositions || []).map(position => position.ticker),
+  ]);
+  for (const ticker of requiredTickers) {
+    const price = market.prices?.[ticker];
+    if (!price || !Number.isFinite(price.close) || price.close <= 0 || price.date !== market.latestDate) {
+      throw new Error(`invalid or stale closing price for ${ticker}`);
+    }
+    if (price.history?.some(row => !Number.isFinite(row.close) || row.close <= 0)) {
+      throw new Error(`invalid closing-price history for ${ticker}`);
+    }
+  }
   return assessReadiness({ brokerAsOf: data.brokerAsOf, marketAsOf: market.latestDate, now, calendar });
 }
 

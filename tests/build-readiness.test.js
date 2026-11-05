@@ -153,6 +153,32 @@ test('authority/hash/reconciliation errors fail during grace rather than defer',
   assert.throws(check, /stateSha256/);
 });
 
+test('readiness rejects invalid or stale prices for current broker holdings', t => {
+  const { dir, snapshot, save } = fixture(t, '2026-09-30', '2026-09-30');
+  snapshot.broker.stocks.push({ ticker: 'AAOI', shares: 100, spot: 50, costBasis: 40, source: 'ibkr-flex' });
+  save();
+  const envBefore = process.env.THETA_DATA_DIR;
+  process.env.THETA_DATA_DIR = dir;
+  t.after(() => {
+    if (envBefore === undefined) delete process.env.THETA_DATA_DIR;
+    else process.env.THETA_DATA_DIR = envBefore;
+  });
+  const marketPath = path.join(dir, 'market_data.json');
+  const check = () => checkReadiness(ROOT, new Date('2026-10-01T11:00:00Z'));
+  for (const price of [
+    { close: null, date: '2026-09-30' },
+    { close: 50, date: '2026-09-29' },
+    { close: 50, date: '2026-09-30', history: [{ date: '2026-09-29', close: null }] },
+  ]) {
+    fs.writeFileSync(marketPath, JSON.stringify({ latestDate: '2026-09-30', prices: { AAOI: price } }));
+    assert.throws(check, /invalid.*closing price|invalid closing-price history/);
+  }
+  fs.writeFileSync(marketPath, JSON.stringify({ latestDate: '2026-09-30', prices: {
+    AAOI: { close: 50, date: '2026-09-30', history: [{ date: '2026-09-30', close: 50 }] },
+  } }));
+  assert.equal(check().ready, true);
+});
+
 test('workflow gate returns explicit ready output, summary and failure status without building', t => {
   for (const [date, time, status, ready] of [
     ['2026-09-29', '2026-09-30T21:40:00Z', 0, 'false'],
